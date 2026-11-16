@@ -46,7 +46,7 @@ python -m venv .venv
 
 ## 下载
 
-在 [Releases](https://github.com/cnsunsz/网络工具/releases) 下载最新的 `网络工具.exe`，双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
+在 [Releases](https://github.com/cnsunsz/wangluo-gongju/releases) 下载最新的 `网络工具.exe`，双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
 关闭窗口默认会完全退出。如需最小化到托盘、开机自启或关闭后保留后台，请在窗口右上角「设置」中打开对应选项。
 
