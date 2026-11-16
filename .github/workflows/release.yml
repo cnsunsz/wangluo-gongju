@@ -1,0 +1,67 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download iperf3 (Windows x64)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          $api = "https://api.github.com/repos/ar51an/iperf3-win-builds/releases/latest"
+          $rel = Invoke-RestMethod -Uri $api -Headers @{ "User-Agent" = "GitHubActions" }
+          $asset = $rel.assets | Where-Object { $_.name -match "win64.*\.zip$" } | Select-Object -First 1
+          if (-not $asset) { throw "未找到 iperf3 Windows x64 压缩包" }
+          Write-Host "下载 $($asset.name) ..."
+          $zip = Join-Path $env:RUNNER_TEMP "iperf3.zip"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip -UseBasicParsing
+          $dest = Join-Path $env:RUNNER_TEMP "iperf3"
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          $exe = Get-ChildItem $dest -Recurse -Filter iperf3.exe | Select-Object -First 1
+          if (-not $exe) { throw "压缩包内没有 iperf3.exe" }
+          Copy-Item $exe.FullName "bin\iperf3.exe"
+          Get-ChildItem $exe.Directory -Filter *.dll | ForEach-Object { Copy-Item $_.FullName (Join-Path "bin" $_.Name) -Force }
+          Get-ChildItem bin | Format-Table Name, Length
+
+      - name: Build exe
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File build.ps1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wangluo-gongju
+          path: dist/网络工具.exe
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 网络工具 ${{ github.ref_name }}
+          files: dist/网络工具.exe
+          generate_release_notes: false
+          body: |
+            Windows 单文件版「网络工具」。下载 `网络工具.exe` 双击即可使用，无需安装，不会在 exe 旁边创建 data 文件夹。
+
+            **默认：关闭窗口即完全退出**，不会残留后台进程。
+            如需最小化到托盘、开机自启，或关闭后保留后台，请在窗口右上角「设置」中打开。
+
+            配置与日志位于 `%LOCALAPPDATA%\网络工具\`。运行需要 Windows 10/11，以及 WebView2（Windows 11 通常已自带）。

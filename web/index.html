@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>网络工具</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <img class="logo" src="favicon.png" alt="" width="28" height="28">
+    <span class="title">网络工具</span>
+    <span class="ver">Windows</span>
+    <span class="author">作者：Lorenzo</span>
+  </div>
+  <div class="top-right">
+    <a class="help-link" href="#" id="settingsLink">设置</a>
+    <a class="help-link" href="#" id="aiSetLink">AI 设置</a>
+    <a class="help-link" href="#" id="helpLink">功能说明</a>
+    <span id="clock"></span>
+  </div>
+</header>
+
+<main class="home" id="home">
+  <div class="grid" id="grid-detect"></div>
+  <div class="divider"></div>
+  <div class="grid" id="grid-query"></div>
+  <div class="divider"></div>
+  <div class="grid" id="grid-adv"></div>
+</main>
+
+<section class="tool-view" id="toolView" hidden>
+  <div class="tool-head">
+    <button class="back" id="backBtn" title="返回">&#8592;</button>
+    <div class="tool-title"><span class="ico" id="toolIcon"></span><h2 id="toolName"></h2></div>
+    <div class="tool-sub" id="toolSub"></div>
+  </div>
+  <div class="tool-body">
+    <form class="panel" id="toolForm" autocomplete="off"></form>
+    <div class="note-card" id="noteCard" hidden></div>
+    <div class="run-bar">
+      <button class="btn primary" id="runBtn" type="button">开始</button>
+      <button class="btn ghost" id="stopBtn" type="button" disabled>停止</button>
+      <button class="btn ghost" id="clearBtn" type="button">清空</button>
+      <button class="btn ghost" id="exportBtn" type="button" disabled>导出</button>
+      <button class="btn ghost" id="aiBtn" type="button" disabled>AI分析</button>
+      <button class="btn ghost" id="pkgBtn" type="button" hidden>导出配置包</button>
+      <button class="btn ghost" id="cmpBtn" type="button" hidden>组内对比</button>
+      <span class="status" id="status">就绪</span>
+    </div>
+    <div class="metrics" id="metrics" hidden></div>
+    <div class="table-wrap" id="tableWrap" hidden></div>
+    <div class="img-box" id="imgBox" hidden></div>
+    <pre class="raw" id="raw" hidden></pre>
+    <div class="console" id="console" hidden></div>
+    <div class="ai-box" id="aiBox" hidden>
+      <div class="ai-head">
+        <b>AI 分析</b><span class="ai-state" id="aiState"></span>
+        <button class="btn ghost small" id="aiCopy" type="button">复制</button>
+        <button class="btn ghost small" id="aiClose" type="button">关闭</button>
+      </div>
+      <pre id="aiText"></pre>
+    </div>
+  </div>
+</section>
+
+<div class="modal" id="aiModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head"><b>AI 分析设置</b><button class="modal-close" id="aiCancel" type="button">&times;</button></div>
+    <div class="modal-body">
+      <label for="aiPreset">预设</label>
+      <select id="aiPreset">
+        <option value="dashscope">阿里云百炼（qwen-plus）</option>
+        <option value="deepseek">DeepSeek（deepseek-chat）</option>
+        <option value="openai">OpenAI（gpt-4o-mini）</option>
+        <option value="ollama">本地 Ollama（qwen2.5:7b）</option>
+        <option value="custom">自定义</option>
+      </select>
+      <label for="aiBase">接口地址（OpenAI 兼容）</label>
+      <input id="aiBase" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+      <label for="aiModel">模型</label>
+      <input id="aiModel" placeholder="qwen-plus">
+      <label for="aiKey">API Key</label>
+      <input id="aiKey" type="password" placeholder="已保存时留空即保持不变">
+      <label for="aiSystem">系统提示（可选）</label>
+      <textarea id="aiSystem" rows="3" placeholder="留空使用内置网络运维提示词"></textarea>
+      <p class="modal-note">Key 仅保存在本机（%LOCALAPPDATA%\网络工具\config\ai.json），不会上传；分析时只发送当前工具的输出，不发送其他文件。</p>
+      <div class="modal-msg" id="aiMsg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="aiTest" type="button">测试连接</button>
+      <button class="btn ghost" id="aiCancel2" type="button">取消</button>
+      <button class="btn primary" id="aiSave" type="button">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head"><b>设置</b><button class="modal-close" id="settingsClose" type="button">&times;</button></div>
+    <div class="modal-body settings-body">
+      <label class="switch-row">
+        <input type="checkbox" id="setMinimize">
+        <span>
+          <b>最小化运行</b>
+          <small>最小化时隐藏到系统托盘（网络图标），点击托盘图标可恢复窗口。</small>
+        </span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" id="setAutostart">
+        <span>
+          <b>开机自启</b>
+          <small>登录 Windows 后自动启动。若同时开启了「最小化运行」或「保留后台运行」，启动时会先进入托盘。</small>
+        </span>
+      </label>
+      <label class="switch-row">
+        <input type="checkbox" id="setBackground">
+        <span>
+          <b>保留后台运行</b>
+          <small>关闭窗口时隐藏到托盘并保持服务运行，而不是退出。默认关闭：关闭窗口即完全退出，不会残留进程。</small>
+        </span>
+      </label>
+      <p class="modal-note" id="settingsPath">配置与日志保存在本机 LocalAppData，不会在程序目录创建 data 文件夹。</p>
+      <div class="modal-msg" id="settingsMsg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="settingsCancel" type="button">取消</button>
+      <button class="btn primary" id="settingsSave" type="button">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal help-modal" id="helpModal" hidden>
+  <div class="modal-box help-box">
+    <div class="modal-head"><b>功能说明</b><button class="modal-close" id="helpClose" type="button">&times;</button></div>
+    <iframe class="help-frame" id="helpFrame" src="about:blank" title="功能说明"></iframe>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="config.js"></script>
+<script src="config2.js"></script>
+<script src="handlers.js"></script>
+<script src="handlers2.js"></script>
+<script src="app.js"></script>
+<script src="settings.js"></script>
+</body>
+</html>
