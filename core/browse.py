@@ -199,11 +199,23 @@ def guard_main_navigation(window) -> None:
         log.exception("guard_main_navigation")
 
 
+
+def _as_file_types(file_types):
+    if not file_types:
+        return None
+    if isinstance(file_types, str):
+        file_types = [file_types]
+    try:
+        return tuple(str(x) for x in file_types if str(x).strip())
+    except Exception:
+        return None
+
+
 class JsBridge:
     def open_url(self, url, title=""):
         return open_browser_window(str(url or ""), str(title or ""))
 
-    def pick_file(self, title="选择文件"):
+    def pick_file(self, title="选择文件", file_types=None):
         try:
             import webview
             win = _main_window
@@ -213,11 +225,43 @@ class JsBridge:
             kind = getattr(dialog, "OPEN", None) if dialog is not None else None
             if kind is None:
                 kind = getattr(webview, "OPEN_DIALOG", None)
-            result = win.create_file_dialog(kind) if kind is not None else win.create_file_dialog()
+            kwargs = {}
+            types = _as_file_types(file_types)
+            if types:
+                kwargs["file_types"] = types
+            if kind is not None:
+                result = win.create_file_dialog(kind, **kwargs)
+            else:
+                result = win.create_file_dialog(**kwargs) if kwargs else win.create_file_dialog()
             if result:
                 if isinstance(result, (list, tuple)):
                     return str(result[0] or "")
                 return str(result)
         except Exception:
             log.exception("pick_file")
+        return ""
+
+    def pick_save(self, title="保存文件", filename="capture.pcap", file_types=None):
+        try:
+            import webview
+            win = _main_window
+            if win is None:
+                return ""
+            dialog = getattr(webview, "FileDialog", None)
+            kind = getattr(dialog, "SAVE", None) if dialog is not None else None
+            if kind is None:
+                kind = getattr(webview, "SAVE_DIALOG", None)
+            kwargs = {"save_filename": str(filename or "capture.pcap")}
+            types = _as_file_types(file_types) or ("Pcap (*.pcap)",)
+            kwargs["file_types"] = types
+            if kind is not None:
+                result = win.create_file_dialog(kind, **kwargs)
+            else:
+                result = win.create_file_dialog(**kwargs)
+            if result:
+                if isinstance(result, (list, tuple)):
+                    return str(result[0] or "")
+                return str(result)
+        except Exception:
+            log.exception("pick_save")
         return ""

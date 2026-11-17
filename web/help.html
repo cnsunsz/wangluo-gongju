@@ -55,11 +55,12 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
 <body>
 <header>
   <div class="wrap">
-    <h1>网络工具 <span class="tag">1.2.2 · Windows / macOS</span></h1>
-    <p class="sub">桌面网络工具箱，独立窗口运行（Windows / macOS）。关闭窗口会隐藏到托盘或后台并保持运行；网页在软件内打开。免安装、免管理员权限，数据只保存在本机。</p>
+    <h1>网络工具 <span class="tag">1.2.3 · Windows / macOS</span></h1>
+    <p class="sub">桌面网络工具箱，独立窗口运行（Windows / macOS）。关闭窗口会隐藏到托盘或后台并保持运行；网页在软件内打开。免安装，一般免管理员权限。数据只保存在本机。实时抓包在 Windows 上需要自行安装 Npcap，部分环境可能需要管理员权限；打开 pcap 文件不需要。</p>
     <p class="author">作者：Lorenzo</p>
     <nav>
       <a href="#start">快速开始</a>
+      <a href="#v123">1.2.3 变化</a>
       <a href="#v122">1.2.2 变化</a>
       <a href="#v121">1.2.1 变化</a>
       <a href="#v120">1.2.0 变化</a>
@@ -81,6 +82,14 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <div class="step"><b><i>4</i>复位与导出</b><span>「清空」复位结果；「导出」把参数、指标、表格、日志、二维码保存为 HTML 报告。</span></div>
   </div>
   <p class="note">服务只监听 127.0.0.1，不对局域网开放。运行日志与配置在 Windows 的 <code>%LOCALAPPDATA%\网络工具\</code>，或 macOS 的 <code>~/Library/Application Support/网络工具/</code>，不会在程序旁边创建 data 文件夹。托盘或菜单栏可「打开窗口」或「退出」（退出会彻底结束进程）。需要打开的外部网页（例如三网拨测）会在软件内弹出子窗口，不会跳到系统浏览器。</p>
+
+
+  <h2 id="v123">1.2.3 有什么变化</h2>
+  <ul class="limit">
+    <li><b>抓包分析</b>：新增类 Wireshark 的三栏视图。上方是报文列表（序号、时间、源/目的地址、协议、长度、Info），点击一行选中该包；中间是 Packet Details，按 Frame / Ethernet / IPv4 或 IPv6 / TCP、UDP、ICMP / ARP / DNS / HTTP 以及常见 TLS 握手字段（记录类型、版本、SNI）逐层展开，解不出的字段会标明「未解出」；下方是十六进制 + ASCII 字节，点选字段会尽量高亮对应范围。三栏在同一页内同屏可见，可拖动调整高度。可用显示过滤按协议、地址、端口或关键字缩小列表。</li>
+    <li><b>离线与实时</b>：可打开 / 保存 <code>.pcap</code>，也能读取常见 <code>.pcapng</code>（结构过复杂时会提示另存为经典 pcap）。打开文件不依赖 Npcap 或管理员权限。实时抓包可列出网卡、设置 BPF 过滤（预置 tcp、udp、icmp、dns、http、tls/443、arp）、开始 / 停止 / 清空。默认最多保留 10000 个包，超限可丢弃最旧或停止并提示。支持按协议统计、会话/对端汇总，以及跟踪 TCP 流（按四元组重组 payload）。</li>
+    <li><b>不内置 Npcap、流量不上云</b>：Windows 实时抓包请到 <a href="https://npcap.com/">https://npcap.com/</a> 自行安装 Npcap（本程序不随包装该组件）。未安装或缺少权限时，界面会说明原因，仍可做离线分析。macOS 使用系统 libpcap，若缺少 <code>/dev/bpf*</code> 权限会同样提示。抓包不会自动开始；流量只在本机分析。明文协议可能含账号、密码或 Cookie，请仅分析你有权查看的流量。</li>
+  </ul>
 
   <h2 id="v122">1.2.2 有什么变化</h2>
   <ul class="limit">
@@ -120,7 +129,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   </ul>
 
   <h2 id="tools">功能清单</h2>
-  <p class="note">Windows 共 47 项（「WLAN 分析」仅检测到无线网卡时显示）；macOS 不显示「Windows 诊断」和「WLAN 分析」；<span class="need">需联网</span> 表示依赖外部接口或目标站点。每项运行结果都可点「导出」保存为自包含 HTML（参数、指标、表格、日志、二维码）。</p>
+  <p class="note">Windows 共 48 项（「WLAN 分析」仅检测到无线网卡时显示）；macOS 不显示「Windows 诊断」和「WLAN 分析」；<span class="need">需联网</span> 表示依赖外部接口或目标站点。每项运行结果都可点「导出」保存为自包含 HTML（参数、指标、表格、日志、二维码）。</p>
 
   <h3>检测类 <span class="chip red">红色分组</span></h3>
   <table>
@@ -141,6 +150,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
       <tr><td>Windows 诊断</td><td>系统常见故障体检（8 类）</td><td>全部或指定一类；可选 AI 关注问题</td><td>启动/自启与快速启动、蓝屏事件与转储、CPU/内存/磁盘、更新挂起与错误、网卡/音频/蓝牙/打印、资源管理器与商店、激活/BitLocker/磁盘空间、时间同步与 WHEA</td></tr>
       <tr><td>站点对比</td><td>多站点耗时 / 状态对比</td><td>最多 20 个 URL；完整分段或只查状态</td><td>状态码、DNS / TCP / TLS / 首字节 / 总计</td></tr>
       <tr><td>三网拨测</td><td>阿里云全国节点 HTTP 拨测（电信/联通/移动）</td><td>域名或 URL</td><td>在软件内新开窗口打开阿里云拨测（不跳系统浏览器）并自动复制域名；查看三网各省市状态码、分段耗时、解析 IP，支持阿里云页面导出报表 <span class="need">需联网</span></td></tr>
+      <tr><td>抓包分析</td><td>类 Wireshark 的报文列表、逐层解析与字节视图</td><td>网卡 + 可选 BPF；或打开 pcap / pcapng</td><td>三栏同屏：列表、字段树（点选高亮字节）、十六进制/ASCII。支持过滤、统计、跟踪 TCP 流、保存为 pcap。打开文件不需 Npcap；Windows 实时抓包需自行安装 Npcap，必要时以管理员运行。流量不上云。标题栏搜索「抓包」「pcap」「Wireshark」「报文分析」可找到本工具</td></tr>
       <tr><td>网卡流量</td><td>各网卡实时上下行</td><td>时长（0 为持续）</td><td>每秒刷新各网卡下行 / 上行速率与累计流量</td></tr>
       <tr><td>NAT 类型</td><td>STUN 检测 NAT 类型</td><td>无需输入</td><td>公网 / 锥型 / 对称型等；部分公用 STUN 不支持 CHANGE-REQUEST 时会如实说明，无法进一步细分锥型 <span class="need">需联网（UDP）</span></td></tr>
       <tr><td>批量任务</td><td>批量 Ping 或批量端口检查</td><td>最多 30 个主机</td><td>逐主机结果表</td></tr>
@@ -241,6 +251,14 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     </ol>
   </div>
 
+  <div class="scene"><b>查看或分析抓到的包</b>
+    <ol>
+      <li>打开「抓包分析」。若只需看已有文件，点「打开 pcap」，不需要 Npcap 或管理员权限。</li>
+      <li>若要实时抓包：Windows 先安装 Npcap（https://npcap.com/），必要时以管理员运行；macOS 若提示 BPF 权限不足，用管理员权限运行。选择网卡和过滤条件后点「开始抓包」，不会自动开始。</li>
+      <li>在列表中点一条报文，中间查看逐层字段，下方对照原始字节。可用「跟踪 TCP 流」重组会话，「统计」查看协议与对端汇总。</li>
+    </ol>
+  </div>
+
   <h2 id="files">文件与依赖</h2>
   <table>
     <thead><tr><th>路径</th><th>说明</th></tr></thead>
@@ -248,7 +266,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
       <tr><td>网络工具.exe</td><td>打包后的单一可执行文件（无控制台、无 _internal、无旁边的 data 目录）</td></tr>
       <tr><td>运行时目录</td><td>Windows：<code>%LOCALAPPDATA%\网络工具\</code>；macOS：<code>~/Library/Application Support/网络工具/</code>。内含日志、单实例锁、url/pid、<code>settings.json</code>、<code>config/ai.json</code>、<code>config/ssh_hosts.json</code>（SSH 主机，密码若选择记住则加密存放）、诊断报告、网卡叠加异常退出时的代理备份。不会在程序旁创建 data 文件夹</td></tr>
       <tr><td>app.py</td><td>桌面窗口 + Flask 本地服务（仅监听 127.0.0.1）</td></tr>
-      <tr><td>core/</td><td>Ping、路由追踪、端口、HTTP、DNS、本机信息、诊断包等实现</td></tr>
+      <tr><td>core/</td><td>Ping、路由追踪、端口、HTTP、DNS、本机信息、诊断包、抓包解析等实现（<code>core/pktcap/</code>）</td></tr>
       <tr><td>web/</td><td>首页、工具页、样式与脚本；<code>help.html</code> 即本说明</td></tr>
       <tr><td>icons/</td><td>程序图标（多尺寸 ICO）</td></tr>
       <tr><td>bin/</td><td>可选：放入 <code>iperf3.exe</code> 与 <code>cygwin1.dll</code> 后重新打包即可内置测速</td></tr>
@@ -259,7 +277,8 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
 
   <h2 id="limits">已知限制</h2>
   <ul class="limit">
-    <li>本工具不做 raw socket 抓包，ICMP 通过系统 <code>ping / tracert</code> 实现，免管理员权限；个别设备屏蔽 ICMP 时会显示超时，可改用 TCPing。</li>
+    <li>Ping / traceroute / MTR 仍通过系统 <code>ping / tracert</code> 实现，一般免管理员权限；个别设备屏蔽 ICMP 时会显示超时，可改用 TCPing。</li>
+    <li>「抓包分析」的实时抓包通过系统 libpcap / Npcap，不会自动开始，也不把流量上传。Windows 不内置 Npcap，未安装时只能打开 pcap 做离线分析。默认最多保留 10000 个包，以免占用过多内存。明文协议可能含密码或 Cookie，请仅在本机分析。</li>
     <li>测速、IP 归属、Whois、全国 DNS 等依赖外网接口，公司代理或防火墙可能拦截；失败会明确提示，不影响本地功能。</li>
     <li>UDP 端口扫描无回包不代表关闭，工具不做判定；只做 TCP 连接扫描。</li>
     <li>IPv6 需要本机与出口都支持；不支持时显示「不支持 IPv6 或超时」。</li>
@@ -276,7 +295,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   <pre><code>powershell -ExecutionPolicy Bypass -File build.ps1</code></pre>
   <p class="note">iperf3 会依次在 PATH、程序目录、<code>_MEIPASS</code> 中查找 <code>bin/iperf3.exe</code>。旧版若在 exe 旁残留 data 目录，首次启动会把 ai.json 和日志迁移到 LocalAppData。</p>
 
-  <footer>网络工具 1.2.2（Windows / macOS）· 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
+  <footer>网络工具 1.2.3（Windows / macOS）· 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
 </main>
 </body>
 </html>

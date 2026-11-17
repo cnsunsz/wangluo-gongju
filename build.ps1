@@ -45,6 +45,11 @@ $args = @(
   "--hidden-import", "qrcode",
   "--hidden-import", "paramiko",
   "--hidden-import", "cryptography",
+  "--hidden-import", "core.pktcap",
+  "--hidden-import", "core.pktcap.dissect",
+  "--hidden-import", "core.pktcap.pcapfile",
+  "--hidden-import", "core.pktcap.libpcap",
+  "--hidden-import", "core.pktcap.session",
   "--collect-all", "webview",
   "--collect-all", "paramiko",
   "--collect-all", "cryptography"

@@ -1,8 +1,14 @@
 # 网络工具
 
-桌面网络工具箱（作者：Lorenzo），提供 **Windows** 与 **macOS** 版本。在本地打开独立窗口，内置 Ping、traceroute、端口扫描、HTTP 探测、DNS、测速、系统体检、网卡叠加、SSH、服务器信息提取等功能（Windows 共 47 项；macOS 隐藏仅 Windows 可用的「Windows 诊断」和「WLAN 分析」）。
+桌面网络工具箱（作者：Lorenzo），提供 **Windows** 与 **macOS** 版本。在本地打开独立窗口，内置 Ping、traceroute、端口扫描、HTTP 探测、DNS、测速、系统体检、抓包分析、网卡叠加、SSH、服务器信息提取等功能（Windows 共 48 项；macOS 隐藏仅 Windows 可用的「Windows 诊断」和「WLAN 分析」）。
 
-当前版本：**1.2.2**。
+当前版本：**1.2.3**。
+
+## 1.2.3 主要变化
+
+- **抓包分析**：新增类 Wireshark 的三栏视图（报文列表、逐层 Packet Details、十六进制/ASCII 字节）。点击一条报文可解析 Frame / Ethernet / IPv4 或 IPv6 / TCP、UDP、ICMP / ARP / DNS / HTTP，以及常见 TLS 握手字段（记录类型、版本、SNI；解不出会标明「未解出」）。点选字段会尽量高亮对应字节。支持简单显示过滤、按协议/会话统计、跟踪 TCP 流、打开与保存 `.pcap`（常见 `.pcapng` 也可读；结构过复杂时会提示另存为 pcap）。
+- **实时抓包可选**：列出网卡、设置 BPF 过滤（预置 tcp / udp / icmp / dns / http / tls/443 / arp）、开始/停止/清空。默认最多保留 10000 个包，超限可丢弃最旧或停止并提示，避免把进程撑死。流量只在本机分析，不会上传。
+- **不内置 Npcap**：Windows 实时抓包需自行安装 [Npcap](https://npcap.com/)（本程序不随包装此组件）。未安装或不具备权限时，界面会说明原因，**仍可打开 pcap 做离线分析**。macOS 实时抓包使用系统 libpcap，若缺少 `/dev/bpf*` 权限会同样提示；打开文件不需要这些权限。明文协议可能含账号、密码或 Cookie，请仅在本机、仅对你有权分析的流量使用。
 
 ## 1.2.2 主要变化
 
@@ -51,8 +57,8 @@
 
 在 [Releases](https://github.com/cnsunsz/wangluo-gongju/releases) 下载对应系统的包：
 
-- Windows：`WangLuoGongJu-v1.2.2.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
-- macOS Apple Silicon：`WangLuoGongJu-v1.2.2-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.2-macOS-x64.zip`。
+- Windows：`WangLuoGongJu-v1.2.3.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
+- macOS Apple Silicon：`WangLuoGongJu-v1.2.3-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.3-macOS-x64.zip`。
 
 点减号（macOS 为黄灯）会最小化到任务栏 / Dock，点关闭才会隐藏到后台并保持运行。需要彻底退出时，请用托盘或菜单栏图标「退出」，或打开窗口后到「设置」里点「退出程序」。标题栏「搜索工具」可过滤主界面图标。
 
@@ -63,6 +69,7 @@
 - 网卡叠加在 Mac 上可用源地址绑定和 `IP_BOUND_IF`，但不会修改系统代理，需要分流的应用请手动填写软件里显示的本地 HTTP / SOCKS5 地址。
 - 开机自启会写入当前用户的 `~/Library/LaunchAgents/com.cnsunsz.wangluogongju.plist`。
 - 窗口使用系统 WKWebView（无需 WebView2）。
+- 「抓包分析」打开 pcap 不需要额外权限。实时抓包使用系统 libpcap，若提示无法访问 `/dev/bpf*`，请用管理员权限运行，或在「隐私与安全性」中授权。
 
 ## 从源码运行
 
@@ -117,3 +124,5 @@ bash build-macos.sh
 作者：Lorenzo。本仓库为对原 PyInstaller 程序的重构与改进，供个人使用与继续开发。
 
 「网卡叠加」是连接级多网卡聚合的独立实现，不是 HypoMux，也未使用其源码。
+
+「抓包分析」是独立实现的报文查看与协议解析，不是 Wireshark / tshark，也不内置或再分发 Npcap。Windows 实时抓包请自行到 https://npcap.com/ 安装 Npcap。

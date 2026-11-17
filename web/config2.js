@@ -213,7 +213,8 @@ Object.assign(ICONS, {
   ifstat: '<svg viewBox="0 0 24 24"><path d="M4 18V10M9 18V6M14 18v-7M19 18V4"/><path d="M3 20h18"/></svg>',
   nat: '<svg viewBox="0 0 24 24"><rect x="3" y="8" width="7" height="8" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/><path d="M10 12h4"/></svg>',
   extract: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
-  ssh: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 14l3-2-3-2M12 14h5"/></svg>'
+  ssh: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 14l3-2-3-2M12 14h5"/></svg>',
+  pcap: '<svg viewBox="0 0 24 24"><rect x="3" y="3.5" width="18" height="17" rx="2"/><path d="M6 8h12M6 12h12M6 16h8"/><circle cx="17.5" cy="16" r="1.4" fill="currentColor" stroke="none"/></svg>'
 });
 
 TOOLS.push(
@@ -251,5 +252,11 @@ TOOLS.push(
   {
     id: 'ssh', name: 'SSH', color: 'pink', icon: 'ssh', group: 'adv',
     sub: '远程终端，可保存常用主机', mode: 'panel'
+  }
+);
+TOOLS.push(
+  {
+    id: 'pcap', name: '抓包分析', color: 'red', icon: 'pcap', group: 'detect',
+    sub: '报文列表 · 逐层解析 · pcap', mode: 'panel'
   }
 );

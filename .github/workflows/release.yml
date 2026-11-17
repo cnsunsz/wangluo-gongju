@@ -145,11 +145,15 @@ jobs:
             - Windows：`%LOCALAPPDATA%\网络工具\`
             - macOS：`~/Library/Application Support/网络工具/`
 
-            ## 1.2.2 更新
+            ## 1.2.3 更新
 
-            - **修复 Windows 无法启动**：v1.2.1 把 PNG 当成窗口/托盘图标交给系统，进程会在启动时静默退出。本版在 Windows 上只向窗口传入 `.ico`；托盘用 Pillow 转为位图。图标失败会降级为无图标继续打开，异常写入 `%LOCALAPPDATA%\网络工具\logs\app.log`。
-            - **崩溃后可再次打开**：上次异常退出留下的单实例锁，若进程已死或服务无响应，会自动接管。
-            - **macOS 启动防护**：打包并优先使用 `app.icns`，不把 Windows `.ico` 直接交给 Cocoa。菜单栏托盘在主窗口就绪后再创建，失败不影响 Dock 与主界面。
+            - **抓包分析**：类 Wireshark 三栏视图（报文列表、逐层 Packet Details、十六进制/ASCII 字节）。点击报文可解析 Frame / Ethernet / IPv4 或 IPv6 / TCP、UDP、ICMP / ARP / DNS / HTTP，以及常见 TLS 握手字段（记录类型、版本、SNI；解不出会标明「未解出」）。点选字段会尽量高亮对应字节。支持显示过滤、协议与会话统计、跟踪 TCP 流，以及打开 / 保存 `.pcap`（常见 `.pcapng` 也可读）。
+            - **实时抓包可选、不会自动开始**：可选网卡与 BPF 过滤。流量只在本机分析，不会上传。默认最多保留 10000 个包，超限丢弃最旧或停止并提示。
+            - **不内置 Npcap**：Windows 实时抓包请自行安装 https://npcap.com/ 。未安装或缺少权限时仍可打开 pcap 做离线分析。macOS 使用系统 libpcap，缺少 BPF 权限时会提示。明文协议可能含账号、密码或 Cookie，请仅在本机分析。
+
+            ## 1.2.2 已有修复
+
+            - 修复 Windows 因 PNG 图标无法启动；崩溃后可再次打开；macOS 启动与托盘防护。
 
             ## 1.2.1 已有能力
 

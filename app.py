@@ -21,7 +21,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory, stream
 
 from core import (
     ai, browse, cndns, dns_tools, http_tools, inspect_tools, local_inspect, local_tools,
-    mux, net_extra, nettools, ping, scan, ssh_tool, trace, win_diag,
+    mux, net_extra, nettools, ping, pktcap, scan, ssh_tool, trace, win_diag,
 )
 from core import procs, settings as app_settings
 from core.paths import (
@@ -1003,6 +1003,202 @@ def api_nat():
     try:
         return _json_ok(local_inspect.nat_detect())
     except Exception as e:
+        return _json_exc(e)
+
+
+
+@app.get("/api/pcap/capability")
+def api_pcap_capability():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **pktcap.capability())
+    except Exception as e:
+        _log("pcap capability", exc=True)
+        return _json_exc(e)
+
+
+@app.get("/api/pcap/interfaces")
+def api_pcap_interfaces():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **pktcap.list_interfaces())
+    except Exception as e:
+        _log("pcap interfaces", exc=True)
+        return _json_exc(e)
+
+
+@app.post("/api/pcap/start")
+def api_pcap_start():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        st = pktcap.start_capture(
+            d.get("iface") or d.get("interface") or "",
+            bpf=d.get("bpf") or "",
+            snaplen=int(d.get("snaplen") or 65535),
+            max_packets=int(d.get("max_packets") or pktcap.DEFAULT_MAX_PACKETS),
+            max_bytes=int(d.get("max_bytes") or pktcap.DEFAULT_MAX_BYTES),
+            on_limit=d.get("on_limit") or "drop",
+            promiscuous=bool(d.get("promiscuous", True)),
+        )
+        return jsonify(ok=True, **st)
+    except (ValueError, RuntimeError) as e:
+        return _json_err(e)
+    except Exception as e:
+        _log("pcap start", exc=True)
+        return _json_exc(e)
+
+
+@app.post("/api/pcap/stop")
+def api_pcap_stop():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **pktcap.stop_capture())
+    except Exception as e:
+        _log("pcap stop", exc=True)
+        return _json_exc(e)
+
+
+@app.post("/api/pcap/clear")
+def api_pcap_clear():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **pktcap.clear_packets())
+    except Exception as e:
+        _log("pcap clear", exc=True)
+        return _json_exc(e)
+
+
+@app.get("/api/pcap/status")
+def api_pcap_status():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **pktcap.status())
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.get("/api/pcap/packets")
+def api_pcap_packets():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        after = int(request.args.get("after") or 0)
+        limit = int(request.args.get("limit") or 500)
+        query = request.args.get("q") or request.args.get("filter") or ""
+        return jsonify(ok=True, **pktcap.packet_summaries(after=after, limit=limit, query=query))
+    except Exception as e:
+        _log("pcap packets", exc=True)
+        return _json_exc(e)
+
+
+@app.get("/api/pcap/packet/<int:no>")
+def api_pcap_packet(no):
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **pktcap.packet_detail(no))
+    except KeyError as e:
+        return _json_err(e, 404)
+    except Exception as e:
+        _log("pcap packet", exc=True)
+        return _json_exc(e)
+
+
+@app.post("/api/pcap/open")
+def api_pcap_open():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        path = d.get("path") or ""
+        max_packets = int(d.get("max_packets") or pktcap.DEFAULT_MAX_PACKETS)
+        return jsonify(ok=True, **pktcap.open_path(path, max_packets=max_packets))
+    except FileNotFoundError as e:
+        return _json_err(e)
+    except Exception as e:
+        _log("pcap open", exc=True)
+        return _json_err(e)
+
+
+@app.post("/api/pcap/upload")
+def api_pcap_upload():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        f = request.files.get("file") or request.files.get("pcap")
+        if f is None:
+            return _json_err("请选择 .pcap / .pcapng 文件")
+        data = f.read()
+        if len(data) > 400 * 1024 * 1024:
+            return _json_err("文件过大（超过 400 MB）")
+        name = f.filename or "capture.pcap"
+        max_packets = int(request.form.get("max_packets") or pktcap.DEFAULT_MAX_PACKETS)
+        return jsonify(ok=True, **pktcap.open_bytes(data, name=name, max_packets=max_packets))
+    except Exception as e:
+        _log("pcap upload", exc=True)
+        return _json_err(e)
+
+
+@app.post("/api/pcap/save")
+def api_pcap_save():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        path = d.get("path") or ""
+        return jsonify(ok=True, **pktcap.save_path(path))
+    except Exception as e:
+        _log("pcap save", exc=True)
+        return _json_err(e)
+
+
+@app.get("/api/pcap/download")
+def api_pcap_download():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        from flask import send_file
+        from io import BytesIO
+        data, name = pktcap.save_bytes()
+        bio = BytesIO(data)
+        bio.seek(0)
+        return send_file(bio, mimetype="application/vnd.tcpdump.pcap", as_attachment=True,
+                         download_name=name)
+    except Exception as e:
+        _log("pcap download", exc=True)
+        return _json_err(e)
+
+
+@app.get("/api/pcap/stats")
+def api_pcap_stats():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        ps = pktcap.protocol_stats()
+        cv = pktcap.conversations()
+        return jsonify(ok=True, protocols=ps["protocols"], total=ps["total"],
+                       conversations=cv["conversations"], conversation_count=cv["total"])
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.get("/api/pcap/follow/<int:no>")
+def api_pcap_follow(no):
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **pktcap.follow_stream(no))
+    except (KeyError, ValueError) as e:
+        return _json_err(e)
+    except Exception as e:
+        _log("pcap follow", exc=True)
         return _json_exc(e)
 
 

@@ -441,7 +441,8 @@ const SEARCH_ALIASES = {
   nattype: 'nat 类型 stun 锥型 对称',
   mux: '网卡叠加 聚合 多网卡 hypomux bond 代理 socks',
   svrextract: '服务器信息提取 合营云 工单 cmdb sn bmc',
-  ssh: 'ssh 终端 远程 shell putty'
+  ssh: 'ssh 终端 远程 shell putty',
+  pcap: '抓包 pcap pcapng wireshark 抓包分析 报文分析 packet tcpdump 嗅探'
 };
 
 function toolSearchHay(t) {
@@ -585,6 +586,9 @@ function closeTool() {
   }
   const panel = $('customPanel');
   if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+  if ($('toolView')) $('toolView').classList.remove('pcap-mode');
+  const runBar = document.querySelector('#toolView .run-bar');
+  if (runBar) runBar.hidden = false;
   $('runBtn').hidden = false;
   $('stopBtn').hidden = false;
   $('runBtn').textContent = '开始';
