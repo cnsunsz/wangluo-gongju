@@ -470,6 +470,7 @@ class TestImports(unittest.TestCase):
         import core.pktcap.pcapfile
         import core.pktcap.libpcap
         import core.pktcap.session
+        import core.pktcap.analysis
         # libpcap load must not throw
         lib, path, err = core.pktcap.libpcap.load()
         self.assertTrue(lib is None or lib is not None)
@@ -488,7 +489,19 @@ class TestAnalysis(unittest.TestCase):
         d = session.packet_detail(no)
         self.assertTrue(d.get("analysis"))
         self.assertTrue(d["analysis"].get("summary"))
+        cons = d["analysis"].get("conclusions") or []
+        self.assertTrue(cons, "每条可解析报文都应有非空分析结论")
+        for c in cons:
+            self.assertTrue(c.get("title"), c)
+            self.assertTrue(c.get("detail"), c)
+            self.assertIn(c.get("level"), ("info", "warn", "error", "note", None))
         return d
+
+    def _concl_text(self, analysis):
+        parts = []
+        for c in analysis.get("conclusions") or []:
+            parts.append((c.get("title") or "") + " " + (c.get("detail") or "") + " " + (c.get("evidence") or ""))
+        return "\n".join(parts)
 
     def test_tcp_handshake_and_fin_ack(self):
         syn = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
@@ -503,15 +516,26 @@ class TestAnalysis(unittest.TestCase):
         a1 = self._detail(1)["analysis"]
         self.assertIn("SYN", a1["summary"])
         self.assertIn("第一", a1["summary"])
+        t1 = self._concl_text(a1)
+        self.assertIn("三次握手第 1 拍", t1)
+        self.assertIn("SYN", t1)
         a2 = self._detail(2)["analysis"]
         self.assertIn("SYN-ACK", a2["summary"])
         self.assertIn("第二", a2["summary"])
+        t2 = self._concl_text(a2)
+        self.assertIn("三次握手第 2 拍", t2)
+        self.assertIn("SYN-ACK", t2)
         a3 = self._detail(3)["analysis"]
         self.assertIn("ACK", a3["summary"])
         self.assertTrue(any("纯 ACK" in (h.get("text") or "") or "第三拍" in a3["summary"] for h in a3["hints"]) or "第三拍" in a3["summary"])
+        t3 = self._concl_text(a3)
+        self.assertTrue("三次握手第 3 拍" in t3 or "纯 ACK" in t3)
         a4 = self._detail(4)["analysis"]
         self.assertIn("FIN", a4["summary"])
         self.assertTrue("关闭" in a4["summary"] or any("FIN" in (h.get("text") or "") for h in a4["hints"]))
+        t4 = self._concl_text(a4)
+        self.assertIn("关闭", t4)
+        self.assertIn("FIN", t4)
         diag = session.diagnose()
         titles = [c["title"] for c in diag["conclusions"]]
         self.assertIn("TCP 握手", titles)
@@ -545,36 +569,56 @@ class TestAnalysis(unittest.TestCase):
         a_ack = self._detail(1)["analysis"]
         self.assertTrue(a_ack["summary"])
         self.assertTrue("ACK" in a_ack["summary"] or any("ACK" in (h.get("text") or "") for h in a_ack["hints"]))
+        self.assertTrue("ACK" in self._concl_text(a_ack))
 
         a_dq = self._detail(2)["analysis"]
         self.assertIn("DNS", a_dq["summary"])
         self.assertIn("查询", a_dq["summary"])
         self.assertIn("www.example.com", a_dq["summary"])
+        t_dq = self._concl_text(a_dq)
+        self.assertIn("DNS 查询", t_dq)
+        self.assertIn("www.example.com", t_dq)
 
         a_da = self._detail(3)["analysis"]
         self.assertIn("应答", a_da["summary"])
         self.assertIn("www.example.com", a_da["summary"])
+        t_da = self._concl_text(a_da)
+        self.assertIn("DNS 应答", t_da)
+        self.assertIn("www.example.com", t_da)
 
         a_http = self._detail(4)["analysis"]
         self.assertIn("HTTP", a_http["summary"])
         self.assertIn("GET", a_http["summary"])
         self.assertIn("www.example.com", a_http["summary"])
+        t_http = self._concl_text(a_http)
+        self.assertIn("HTTP 请求", t_http)
+        self.assertIn("GET", t_http)
+        self.assertIn("www.example.com", t_http)
 
         a_arp = self._detail(5)["analysis"]
         self.assertIn("ARP", a_arp["summary"])
         self.assertTrue("请求" in a_arp["summary"] or "Who has" in (a_arp["summary"] + str(a_arp["points"])))
         self.assertIn("192.168.1.1", a_arp["summary"])
+        t_arp = self._concl_text(a_arp)
+        self.assertIn("ARP 请求", t_arp)
+        self.assertIn("192.168.1.1", t_arp)
 
         a_icmp = self._detail(6)["analysis"]
         self.assertTrue("回显请求" in a_icmp["summary"] or "ping" in a_icmp["summary"].lower())
+        t_icmp = self._concl_text(a_icmp)
+        self.assertTrue("回显请求" in t_icmp or "ping" in t_icmp.lower())
 
         a_un = self._detail(7)["analysis"]
         self.assertIn("不可达", a_un["summary"])
+        self.assertIn("不可达", self._concl_text(a_un))
 
         a_tls = self._detail(8)["analysis"]
         self.assertIn("TLS", a_tls["summary"])
         self.assertIn("example.com", a_tls["summary"])
         self.assertIn("不解密", a_tls["summary"])
+        t_tls = self._concl_text(a_tls)
+        self.assertIn("TLS ClientHello", t_tls)
+        self.assertIn("example.com", t_tls)
 
         diag = session.diagnose()
         self.assertGreaterEqual(diag["count"], 8)
@@ -600,12 +644,32 @@ class TestAnalysis(unittest.TestCase):
         self._open([syn, rst, data, retr])
         a_rst = self._detail(2)["analysis"]
         self.assertIn("RST", a_rst["summary"])
+        self.assertIn("RST", self._concl_text(a_rst))
         a_re = self._detail(4)["analysis"]
         self.assertTrue(any("重传" in (h.get("text") or "") for h in a_re["hints"]) or "重传" in a_re["summary"])
+        self.assertIn("重传", self._concl_text(a_re))
         diag = session.diagnose()
         titles = [c["title"] for c in diag["conclusions"]]
         self.assertTrue(any("重置" in t or "RST" in t for t in titles))
         self.assertTrue(any("重传" in t for t in titles))
+
+    def test_packet_api_returns_conclusions(self):
+        # /api/pcap/packet/<n> 返回 jsonify(ok=True, **pktcap.packet_detail(no))
+        syn = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("10.0.0.1", "10.0.0.2", 6, tcp_seg(40000, 443, 1000, 0, 0x02)))
+        self._open([syn])
+        import json
+        payload = {"ok": True, **session.packet_detail(1)}
+        # 模拟接口 JSON 序列化，保证 conclusions 能随响应发出
+        d = json.loads(json.dumps(payload, ensure_ascii=False))
+        self.assertTrue(d.get("ok"))
+        self.assertIn("analysis", d)
+        self.assertIn("conclusions", d["analysis"])
+        cons = d["analysis"]["conclusions"]
+        self.assertTrue(cons)
+        self.assertTrue(cons[0].get("title"))
+        self.assertTrue(cons[0].get("detail"))
+        self.assertIn("SYN", (cons[0].get("title") or "") + (cons[0].get("detail") or ""))
 
     def tearDown(self):
         try:

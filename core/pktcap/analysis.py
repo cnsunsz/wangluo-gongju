@@ -446,8 +446,322 @@ def _endpoint_phrase(view: dict) -> str:
     return f"{proto} 报文，从 {src} 到 {dst}"
 
 
+
+def _conclusion(level: str, title: str, detail: str, evidence: str = "") -> dict:
+    return {
+        "level": level or "info",
+        "title": re.sub(r"\s+", " ", (title or "")).strip(),
+        "detail": re.sub(r"\s+", " ", (detail or "")).strip(),
+        "evidence": re.sub(r"\s+", " ", (evidence or "")).strip(),
+    }
+
+
+def _hint_conclusion(hint: dict) -> dict | None:
+    text = (hint.get("text") or "").strip()
+    if not text:
+        return None
+    level = hint.get("level") or "info"
+    if level == "note":
+        level = "info"
+    low = text.lower()
+    if "校验和" in text:
+        title = "校验和异常"
+        level = "error"
+    elif "截断" in text:
+        title = "报文被截断"
+    elif "零窗口" in text:
+        title = "零窗口"
+    elif "重传" in text:
+        title = "可能重传"
+    elif "乱序" in text:
+        title = "可能乱序"
+    elif "标志组合异常" in text:
+        title = "标志组合异常"
+    elif "nxdomain" in low:
+        title = "域名不存在"
+    elif "dns 应答异常" in low or "dns 应答异常" in text:
+        title = "DNS 应答异常"
+    elif text.startswith("HTTP ") and ("服务器出错" in text or "未被成功处理" in text):
+        title = "HTTP 状态异常"
+    elif "纯 ack" in low or "纯 ACK" in text:
+        title = "纯 ACK"
+    elif "fin" in low and "载荷" in text:
+        title = "FIN 无载荷"
+    else:
+        title = "注意事项"
+    return _conclusion(level, title, text)
+
+
+def _build_packet_conclusions(
+    view: dict,
+    *,
+    proto: str,
+    summary: str,
+    points: list[str],
+    hints: list[dict],
+    app: dict,
+    hs: dict,
+    peers: list[dict],
+    flag_names: list[str],
+    plen: int,
+    is_tcp: bool,
+    recognized: list[str],
+    window,
+    ttl,
+) -> list[dict]:
+    """把本包事实整理成若干条带标题的分析结论，保证非空。"""
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(level: str, title: str, detail: str, evidence: str = "") -> None:
+        item = _conclusion(level, title, detail, evidence)
+        if not item["title"] or not item["detail"]:
+            return
+        key = (item["title"], item["detail"])
+        if key in seen:
+            return
+        seen.add(key)
+        out.append(item)
+
+    src, dst = _endpoint(view, "src"), _endpoint(view, "dst")
+    ev_end = f"{src} → {dst}"
+    ev_flags = ("TCP 标志：" + "、".join(flag_names)) if flag_names else ""
+    flags = int(view.get("tcp_flags") or 0)
+    ev_seq = ""
+    if view.get("tcp_seq") is not None:
+        ev_seq = f"Seq={view.get('tcp_seq')}"
+        if _has(flags, "ACK"):
+            ev_seq += f" Ack={view.get('tcp_ack')}"
+
+    if proto == "ARP" or app.get("arp"):
+        arp = app.get("arp") or {}
+        op = (arp.get("op") or view.get("info") or "")
+        spa = arp.get("spa") or view.get("src") or ""
+        tpa = arp.get("tpa") or view.get("dst") or ""
+        sha = arp.get("sha") or ""
+        ev = ev_end + (f"；{op}" if op else "")
+        if "who has" in op.lower() or "request" in op.lower() or "请求" in op:
+            add("info", "ARP 请求", f"{spa} 询问 {tpa} 的 MAC 地址。", ev)
+            add("info", "局域网地址解析", "ARP 请求通常以广播发送，用于在局域网解析 IPv4 地址对应的硬件地址。")
+        elif "is at" in op.lower() or "reply" in op.lower() or "应答" in op or "响应" in op:
+            add("info", "ARP 应答", f"{spa} 宣称其 MAC 为 {sha or '（见字段）'}，回答对 {tpa} 的查询。", ev)
+            add("info", "地址绑定", "ARP 应答把 IP 与 MAC 的对应关系告诉请求方。")
+        else:
+            add("info", "ARP 报文", summary or f"这是一条 ARP 报文，从 {src} 到 {dst}。", ev)
+
+    elif proto in ("ICMP", "ICMPV6") or app.get("icmp"):
+        icmp = app.get("icmp") or {}
+        typ = icmp.get("type")
+        code = icmp.get("code")
+        v6 = proto == "ICMPv6" or icmp.get("v6")
+        kind = "ICMPv6" if v6 else "ICMP"
+        ev = ev_end + (f"；类型 {typ}，代码 {code}" if typ is not None else "")
+        if typ == 3 and not v6:
+            extra = ICMP4_UNREACH.get(code, f"代码 {code}")
+            add("warn", "目的不可达", f"这是一条 ICMP 目的不可达报文，从 {src} 到 {dst}，含义是{extra}。", ev)
+        elif typ == 1 and v6:
+            add("warn", "目的不可达", f"这是一条 ICMPv6 目的不可达报文，从 {src} 到 {dst}。", ev)
+        elif typ in (8, 128):
+            add("info", f"{kind} 回显请求", f"这是一条 {kind} 回显请求（ping），从 {src} 到 {dst}，用于探测对端是否可达。", ev)
+        elif typ in (0, 129):
+            add("info", f"{kind} 回显应答", f"这是一条 {kind} 回显应答，从 {src} 到 {dst}，是对先前 ping 请求的回复。", ev)
+        else:
+            table = ICMP6 if v6 else ICMP4
+            name = table.get(typ, icmp.get("name") or kind)
+            add("info", f"{kind} 报文", summary or f"这是一条 {kind} 报文（{name}），从 {src} 到 {dst}。", ev)
+        if ttl is not None:
+            add("info", "生存时间", f"TTL / Hop Limit 为 {ttl}。")
+
+    elif proto == "DNS" or app.get("dns"):
+        dns = app.get("dns") or {}
+        qn = dns.get("qname") or "（域名未解出）"
+        qt = dns.get("qtype") or "记录"
+        ev = ev_end + f"；{qt} {qn}"
+        if dns.get("response"):
+            answers = "；".join(dns.get("answers") or [])
+            rcode = dns.get("rcode") or ""
+            detail = f"这是一条 DNS 应答，从 {src} 到 {dst}，回答 {qt} {qn}"
+            if answers:
+                detail += f"：{answers}"
+            detail += "。"
+            add("info", "DNS 应答", detail, ev)
+            if rcode and rcode.lower() not in ("no error", "0", "noerror"):
+                add("warn", "DNS 响应码", f"响应码为 {rcode}。", rcode)
+            elif answers:
+                add("info", "解析结果", f"应答记录：{answers}。", ev)
+            else:
+                add("info", "应答记录", "应答中未见已解出的资源记录，或记录类型未解析。")
+        else:
+            add("info", "DNS 查询", f"这是一条 DNS 查询，从 {src} 到 {dst}，询问 {qt} {qn}。", ev)
+            add("info", "查询内容", f"查询类型 {qt}，名称 {qn}。")
+
+    elif proto == "HTTP" or app.get("http"):
+        http = app.get("http") or {}
+        host = http.get("host") or ""
+        method = http.get("method") or ""
+        path = http.get("path") or ""
+        status = http.get("status") or ""
+        if method:
+            detail = f"这是一条 HTTP 请求，从 {src} 到 {dst}：{method} {path or '/'}"
+            if host:
+                detail += f"（Host: {host}）"
+            detail += "。"
+            add("info", "HTTP 请求", detail, ev_end + f"；{method} {path or '/'}")
+            if host:
+                add("info", "目标主机", f"目标主机 {host}。", f"Host: {host}")
+        elif status:
+            level = "info"
+            try:
+                code = int(str(status).split()[0])
+                if code >= 400:
+                    level = "warn"
+            except (TypeError, ValueError):
+                pass
+            add(level, "HTTP 响应", f"这是一条 HTTP 响应，从 {src} 到 {dst}，状态 {status}。", ev_end + f"；{status}")
+        else:
+            add("info", "HTTP 报文", summary or f"这是一条 HTTP 报文，从 {src} 到 {dst}。", ev_end)
+        if is_tcp and flag_names:
+            add("info", "TCP 承载", f"承载在 TCP 上，标志为 {'、'.join(flag_names)}，载荷 {plen} 字节。", ev_flags)
+
+    elif proto in ("TLS", "SSL") or app.get("tls"):
+        tls = app.get("tls") or {}
+        sni = tls.get("sni") or ""
+        hs_name = tls.get("handshake") or ""
+        rec = tls.get("record") or ""
+        blob = (hs_name + " " + (view.get("info") or "")).lower()
+        if sni or "client hello" in blob:
+            detail = f"这是一条 TLS ClientHello，从 {src} 到 {dst}"
+            if sni:
+                detail += f"，SNI 为 {sni}"
+            else:
+                detail += "，未能解出 SNI"
+            detail += "。本工具不解密 TLS 内容。"
+            ev = ev_end + (("；SNI=" + sni) if sni else "；ClientHello")
+            add("info", "TLS ClientHello", detail, ev)
+            if sni:
+                add("info", "访问主机名", f"客户端在握手中声明要访问的主机名（SNI）是 {sni}。", f"SNI={sni}")
+            add("info", "不解密内容", "只能看到握手明文字段；加密后的应用数据不会被解密。")
+        elif "server hello" in blob:
+            add("info", "TLS ServerHello", f"这是一条 TLS ServerHello，从 {src} 到 {dst}。本工具不解密 TLS 内容。", ev_end)
+            if tls.get("version"):
+                add("info", "TLS 版本字段", f"记录或遗留版本字段为 {tls.get('version')}。")
+        elif "application data" in ((rec or "") + (view.get("info") or "")).lower():
+            add("info", "TLS 应用数据", f"这是一条 TLS 应用数据，从 {src} 到 {dst}。内容已加密，本工具不解密。", ev_end)
+        else:
+            extra = hs_name or rec or view.get("info") or "握手或记录未完全解出"
+            add("info", "TLS 报文", f"这是一条 TLS 报文，从 {src} 到 {dst}（{extra}）。本工具不解密 TLS 内容。", ev_end)
+
+    elif is_tcp or proto == "TCP":
+        role = _this_packet_role(view, hs, peers)
+        ev = "；".join(x for x in (ev_end, ev_flags, ev_seq) if x)
+        if _has(flags, "RST"):
+            add("warn", "RST 中止连接", role or "这条报文用 RST 中止连接。", ev)
+        elif _has(flags, "SYN") and not _has(flags, "ACK"):
+            add("info", "三次握手第 1 拍", role or "这是 TCP 三次握手的第一拍（SYN），用于发起连接。", ev)
+        elif _has(flags, "SYN") and _has(flags, "ACK"):
+            add("info", "三次握手第 2 拍", role or "这是 TCP 三次握手的第二拍（SYN-ACK），对端同意建立连接。", ev)
+        elif _has(flags, "FIN"):
+            add("info", "连接正在关闭", role or "这是 TCP FIN+ACK，连接正在关闭。", ev)
+        elif (
+            _has(flags, "ACK")
+            and not _has(flags, "SYN")
+            and plen == 0
+            and not _has(flags, "PSH")
+            and not _has(flags, "FIN")
+            and not _has(flags, "RST")
+        ):
+            if hs.get("syn") and hs.get("synack") and hs.get("ack_no") == view.get("no"):
+                add("info", "三次握手第 3 拍", role or "这是 TCP 三次握手的第三拍（ACK），连接随后可以传输数据。", ev)
+            else:
+                add("info", "纯 ACK", role or "这是一条无载荷的纯 ACK，用于确认对端已收到的数据或控制报文。", ev)
+        elif plen > 0:
+            add("info", "携带有效载荷", role or f"这条报文携带有效载荷，共 {plen} 字节。", ev)
+        else:
+            add("info", "TCP 报文", role or summary or f"这是一条 TCP 报文，从 {src} 到 {dst}。", ev)
+        if ev_flags:
+            add("info", "TCP 标志", "TCP 标志：" + "、".join(flag_names) + "。", ev_seq or ev_flags)
+        if window is not None:
+            add("info", "通告窗口", f"通告窗口为 {window}。")
+        if peers and hs:
+            if hs.get("complete"):
+                add("info", "流状态", "同一条流里已能看到完整或已在传输数据的握手过程。")
+            elif hs.get("syn") and not hs.get("synack"):
+                add("info", "流状态", "同一条流目前只见到 SYN，还没有看到 SYN-ACK。")
+            elif hs.get("syn") and hs.get("synack") and not hs.get("ack"):
+                add("info", "流状态", "同一条流已有 SYN 与 SYN-ACK，尚未看到第三拍 ACK。")
+
+    elif proto == "UDP":
+        add("info", "UDP 报文", summary or f"这是一条 UDP 报文，从 {src} 到 {dst}，载荷 {plen} 字节。", ev_end)
+        add("info", "已识别到的层次", "已识别到 UDP。若端口不是常见协议，载荷未再往上解析。")
+        sport, dport = view.get("sport"), view.get("dport")
+        if sport not in (53, 5353) and dport not in (53, 5353, 67, 68, 123, 161, 162, 443, 853):
+            add("info", "上层未解析", "其余上层协议未能解析，不假装已分析出应用内容。")
+
+    else:
+        if recognized:
+            add(
+                "info",
+                "已识别到的层次",
+                f"这是一条 {proto} 报文，从 {src} 到 {dst}。已识别到 {' / '.join(recognized)}。其余部分未能解析，不编造结论。",
+                ev_end,
+            )
+        else:
+            add(
+                "info",
+                "未能完全解析",
+                summary or f"这是一条 {proto} 报文，从 {src} 到 {dst}，未能解析出更高层协议。",
+                ev_end,
+            )
+
+    # 把告警类 hints 升为结论（避免与已有标题或正文重复）
+    existing_titles = {c["title"] for c in out}
+    existing_details = {c["detail"] for c in out}
+    for h in hints:
+        item = _hint_conclusion(h)
+        if not item:
+            continue
+        # 纯 ACK / FIN 无载荷已在主结论中说明时不再重复
+        if item["title"] in ("纯 ACK", "FIN 无载荷") and item["title"] in existing_titles:
+            continue
+        if item["detail"] in existing_details:
+            continue
+        if any(item["detail"] in (c["detail"] or "") or (c["detail"] or "") in item["detail"] for c in out):
+            continue
+        key = (item["title"], item["detail"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+
+    if not out:
+        if recognized:
+            add(
+                "info",
+                "已识别到的层次",
+                f"已识别到 {' / '.join(recognized)}。其余部分未能解析，不编造更高层结论。",
+                (view.get("info") or ev_end),
+            )
+        else:
+            add(
+                "info",
+                "未能完全解析",
+                summary or f"这是第 {view.get('no') or '?'} 号报文（{proto}），从 {src} 到 {dst}。",
+            )
+
+    # 通常保留 2～5 条，告警优先不被截掉
+    if len(out) > 5:
+        warns = [c for c in out if c["level"] in ("error", "warn")]
+        infos = [c for c in out if c["level"] not in ("error", "warn")]
+        keep = (warns + infos)[:5]
+        # 保持相对原顺序
+        order = {id(c): i for i, c in enumerate(out)}
+        keep.sort(key=lambda c: order.get(id(c), 0))
+        out = keep
+    return out
+
+
 def analyze_packet(view: dict, *, raw: Any = None, stream: list[dict] | None = None) -> dict:
-    """为单条报文生成中文说明。返回 summary / points / hints，保证 summary 非空。"""
+    """为单条报文生成中文说明。返回 summary / points / hints / conclusions，保证 summary 与 conclusions 非空。"""
     view = view or {}
     raw_b = _decode_raw(raw)
     app = _extract_app(view)
@@ -693,10 +1007,27 @@ def analyze_packet(view: dict, *, raw: Any = None, stream: list[dict] | None = N
     if not summary.endswith("。") and not summary.endswith("."):
         summary += "。"
 
+    conclusions = _build_packet_conclusions(
+        view,
+        proto=proto,
+        summary=summary,
+        points=points,
+        hints=hints,
+        app=app,
+        hs=hs,
+        peers=peers,
+        flag_names=flag_names,
+        plen=plen,
+        is_tcp=is_tcp,
+        recognized=recognized,
+        window=window,
+        ttl=ttl,
+    )
     return {
         "summary": summary,
         "points": [re.sub(r"\s+", " ", p).strip() for p in points if p],
         "hints": hints,
+        "conclusions": conclusions,
         "protocol": proto,
     }
 
@@ -1021,6 +1352,11 @@ def build_ai_brief(diagnosis: dict, *, selected: dict | None = None,
         )
         if selected_analysis:
             lines.append("规则解读：" + (selected_analysis.get("summary") or ""))
+            for c in selected_analysis.get("conclusions") or []:
+                ev = f"（依据：{c.get('evidence')}）" if c.get("evidence") else ""
+                lines.append(
+                    f"  结论[{c.get('level') or 'info'}] {c.get('title')}：{sanitize_text(c.get('detail') or '', 200)}{ev}"
+                )
             for p in selected_analysis.get("points") or []:
                 lines.append("  - " + sanitize_text(p, 200))
             for h in selected_analysis.get("hints") or []:

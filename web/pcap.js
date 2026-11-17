@@ -1,4 +1,4 @@
-/* 抓包分析：列表 / 报文分析（含离线诊断） / 逐层详情 / 字节 */
+/* 抓包分析：列表 / 报文分析（分析结论 + 整次抓包结论） / 逐层详情 / 字节 */
 window.PANELS = window.PANELS || {};
 
 (function () {
@@ -25,8 +25,8 @@ window.PANELS = window.PANELS || {};
   let firstTs = 0;
   let cap = null;
   let listAtBottom = true;
-  let splitRatios = [0.44, 0.36, 0.20];
-  let midRatio = 0.48;
+  let splitRatios = [0.36, 0.44, 0.20];
+  let midRatio = 0.56;
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -464,6 +464,7 @@ window.PANELS = window.PANELS || {};
     const body = $id('pcapListBody');
     if (body && running && listAtBottom) body.scrollTop = body.scrollHeight;
     if (add.length || reset) scheduleDiagnose();
+    if (!selectedNo && (filtered.length || packets.length)) selectFirstVisible();
     return d;
   }
 
@@ -534,7 +535,9 @@ window.PANELS = window.PANELS || {};
       const ana = $id('pcapPktAnaBody');
       if (tree) tree.innerHTML = '<div class="pcap-empty">选择一条报文，查看逐层字段</div>';
       if (bytes) bytes.innerHTML = '<div class="pcap-empty">选择一条报文以查看原始字节</div>';
-      if (ana) ana.innerHTML = '<div class="pcap-empty">选择一条报文，查看这条报文在做什么</div>';
+      const root = $id('pcapAnalysis');
+      if (root) root.classList.remove('has-packet');
+      if (ana) ana.innerHTML = '<div class="pcap-empty">打开或抓取报文后，将自动选中第一条并给出分析结论</div>';
     } catch (e) {
       setPcapStatus(e.message || String(e), 'err');
     }
@@ -594,7 +597,7 @@ window.PANELS = window.PANELS || {};
     selectedNo = 0;
     applyStatus(d);
     await pull(true);
-    if (packets.length) selectPacket(packets[0].no);
+    selectFirstVisible(true);
     scheduleDiagnose();
     toast('已载入 ' + (d.count || packets.length) + ' 个报文');
   }
@@ -691,22 +694,53 @@ window.PANELS = window.PANELS || {};
     }
   }
 
+  function conclusionCards(list) {
+    return '<ul class="pcap-diag-list pcap-concl-list">' + list.map(c =>
+      '<li class="pcap-diag-item ' + esc(c.level || 'info') + '"><b>' + esc(c.title) +
+      '</b><span>' + esc(c.detail) + '</span>' +
+      (c.evidence ? '<small>依据：' + esc(c.evidence) + '</small>' : '') +
+      '</li>').join('') + '</ul>';
+  }
+
+  function setHasPacket(on) {
+    const root = $id('pcapAnalysis');
+    if (root) root.classList.toggle('has-packet', !!on);
+  }
+
+  function selectFirstVisible(force) {
+    const list = filtered.length ? filtered : packets;
+    if (!list.length) {
+      setHasPacket(false);
+      return;
+    }
+    if (!force && selectedNo && list.some(p => p.no === selectedNo)) return;
+    selectPacket(list[0].no);
+  }
+
   function renderPacketAnalysis(ana) {
     const box = $id('pcapPktAnaBody');
     if (!box) return;
-    if (!ana || !ana.summary) {
-      box.innerHTML = '<div class="pcap-empty">没有分析说明</div>';
+    const list = (ana && ana.conclusions) || [];
+    if (list.length) {
+      setHasPacket(true);
+      box.innerHTML = conclusionCards(list);
       return;
     }
-    let html = '<p class="pcap-ana-summary">' + esc(ana.summary) + '</p>';
-    if (ana.points && ana.points.length) {
-      html += '<ul class="pcap-ana-points">' + ana.points.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>';
+    if (ana && ana.summary) {
+      setHasPacket(true);
+      let html = '<p class="pcap-ana-summary">' + esc(ana.summary) + '</p>';
+      if (ana.points && ana.points.length) {
+        html += '<ul class="pcap-ana-points">' + ana.points.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>';
+      }
+      if (ana.hints && ana.hints.length) {
+        html += '<ul class="pcap-ana-hints">' + ana.hints.map(h =>
+          '<li class="' + esc(h.level || 'note') + '">' + esc(h.text) + '</li>').join('') + '</ul>';
+      }
+      box.innerHTML = html;
+      return;
     }
-    if (ana.hints && ana.hints.length) {
-      html += '<ul class="pcap-ana-hints">' + ana.hints.map(h =>
-        '<li class="' + esc(h.level || 'note') + '">' + esc(h.text) + '</li>').join('') + '</ul>';
-    }
-    box.innerHTML = html;
+    setHasPacket(false);
+    box.innerHTML = '<div class="pcap-empty">没有分析结论</div>';
   }
 
   let diagTimer = null;
@@ -829,7 +863,7 @@ window.PANELS = window.PANELS || {};
           const df = dy / total;
           const a = start[idx - 1] + df;
           const b = start[idx] - df;
-          if (a < 0.16 || b < 0.16) return;
+          if (a < 0.20 || b < 0.20) return;
           splitRatios[idx - 1] = a;
           splitRatios[idx] = b;
           apply();
@@ -925,13 +959,13 @@ window.PANELS = window.PANELS || {};
             <div class="pcap-pane pcap-analysis-pane" id="pcapAnalysisPane">
               <div class="pcap-pane-label">报文分析</div>
               <div class="pcap-analysis" id="pcapAnalysis">
-                <section class="pcap-diag">
-                  <h3>离线诊断</h3>
-                  <div id="pcapDiagBody"><div class="pcap-empty">打开或抓取报文后，将在此给出整次抓包的结论</div></div>
+                <section class="pcap-pkt-ana" id="pcapPktAnaSection">
+                  <h3>分析结论</h3>
+                  <div id="pcapPktAnaBody"><div class="pcap-empty">打开或抓取报文后，将自动选中第一条并给出分析结论</div></div>
                 </section>
-                <section class="pcap-pkt-ana">
-                  <h3>本包说明</h3>
-                  <div id="pcapPktAnaBody"><div class="pcap-empty">选择一条报文，查看这条报文在做什么</div></div>
+                <section class="pcap-diag" id="pcapDiagSection">
+                  <h3>整次抓包结论</h3>
+                  <div id="pcapDiagBody"><div class="pcap-empty">打开或抓取报文后，将在此给出整次抓包的结论</div></div>
                 </section>
               </div>
             </div>
@@ -982,7 +1016,7 @@ window.PANELS = window.PANELS || {};
       }
     };
     $id('pcapBpf').addEventListener('input', () => { $id('pcapBpf').dataset.fromPreset = '0'; });
-    $id('pcapFilter').addEventListener('input', () => { renderList(); scheduleDiagnose(); });
+    $id('pcapFilter').addEventListener('input', () => { renderList(); scheduleDiagnose(); selectFirstVisible(); });
     $id('pcapFile').addEventListener('change', ev => {
       const f = ev.target.files && ev.target.files[0];
       ev.target.value = '';
@@ -1045,7 +1079,7 @@ window.PANELS = window.PANELS || {};
     loadCapability().then(() => {
       pull(true).then(d => {
         if (d && d.running) startPoll();
-        if (packets.length) selectPacket(packets[0].no);
+        selectFirstVisible();
         scheduleDiagnose();
       }).catch(() => {});
     });

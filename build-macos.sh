@@ -97,6 +97,7 @@ echo "开始打包..."
   --hidden-import core.pktcap.pcapfile \
   --hidden-import core.pktcap.libpcap \
   --hidden-import core.pktcap.session \
+  --hidden-import core.pktcap.analysis \
   --collect-all webview \
   --collect-all paramiko \
   --collect-all cryptography \
