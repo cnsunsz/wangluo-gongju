@@ -520,9 +520,16 @@ function openTool(tool) {
     $('pkgBtn').hidden = true;
     $('cmpBtn').hidden = true;
     $('console').classList.remove('tall');
-    const hideRun = tool.id === 'svrextract';
-    $('runBtn').hidden = hideRun;
-    $('stopBtn').hidden = hideRun;
+    const hideBar = tool.id === 'svrextract' || tool.id === 'pcap';
+    const runBar = document.querySelector('#toolView .run-bar');
+    if (runBar) runBar.hidden = hideBar;
+    $('runBtn').hidden = hideBar;
+    $('stopBtn').hidden = hideBar;
+    if (tool.id === 'pcap') {
+      $('clearBtn').hidden = true;
+      $('exportBtn').hidden = true;
+      $('aiBtn').hidden = true;
+    }
     if (tool.id === 'mux') { $('runBtn').textContent = '启动聚合'; $('stopBtn').textContent = '停止聚合'; }
     else if (tool.id === 'ssh') { $('runBtn').textContent = '连接'; $('stopBtn').textContent = '断开'; }
     else { $('runBtn').textContent = '开始'; $('stopBtn').textContent = '停止'; }
@@ -591,6 +598,8 @@ function closeTool() {
   if (runBar) runBar.hidden = false;
   $('runBtn').hidden = false;
   $('stopBtn').hidden = false;
+  if ($('clearBtn')) $('clearBtn').hidden = false;
+  if ($('exportBtn')) $('exportBtn').hidden = false;
   $('runBtn').textContent = '开始';
   $('stopBtn').textContent = '停止';
   state.tool = null;
@@ -756,8 +765,22 @@ const AI_PRESETS = {
   dashscope: ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'qwen-plus'],
   deepseek: ['https://api.deepseek.com/v1', 'deepseek-chat'],
   openai: ['https://api.openai.com/v1', 'gpt-4o-mini'],
+  mimo: ['https://api.xiaomimimo.com/v1', 'mimo-v2.6-pro'],
+  grok: ['https://api.x.ai/v1', 'grok-4.7'],
   ollama: ['http://127.0.0.1:11434/v1', 'qwen2.5:7b']
 };
+const AI_PRESET_NOTES = {
+  mimo: '按量付费默认使用该地址和模型 mimo-v2.6-pro（也可改为 mimo-v2.6-flash 或 mimo-v2.6-pro-ultraspeed）。Token Plan 请改用控制台里的 Base URL（如 https://token-plan-cn.xiaomimimo.com/v1）和 tp- / ttp- 密钥，不要与 sk- 混用。文档：https://mimo.mi.com/docs/zh-CN/quick-start/first-api-call',
+  grok: '使用 xAI 官方 OpenAI 兼容接口，默认模型为当前旗舰 grok-4.7。请到 https://console.x.ai/ 自行填写 API Key，软件不会内置任何密钥。'
+};
+function updateAiPresetNote() {
+  const el = $('aiPresetNote');
+  if (!el) return;
+  const key = $('aiPreset') ? $('aiPreset').value : '';
+  const text = AI_PRESET_NOTES[key] || '';
+  el.textContent = text;
+  el.hidden = !text;
+}
 
 async function loadAiConfig() {
   try {
@@ -788,6 +811,7 @@ function openAiSettings() {
   Object.entries(AI_PRESETS).forEach(([k, [base, model]]) => {
     if (base === cfg.base_url && model === cfg.model) $('aiPreset').value = k;
   });
+  updateAiPresetNote();
   aiMsg('');
   $('aiModal').hidden = false;
 }
@@ -984,6 +1008,7 @@ function bootUI() {
   $('aiPreset').onchange = () => {
     const p = AI_PRESETS[$('aiPreset').value];
     if (p) { $('aiBase').value = p[0]; $('aiModel').value = p[1]; }
+    updateAiPresetNote();
   };
   $('aiSave').onclick = saveAiSettings;
   $('aiTest').onclick = testAiSettings;

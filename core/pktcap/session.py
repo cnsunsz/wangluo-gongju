@@ -11,6 +11,12 @@ from collections import deque
 from typing import Optional
 
 from core.pktcap import libpcap as lp
+from core.pktcap.analysis import (
+    _checksum_hints,
+    analyze_packet,
+    build_ai_brief,
+    diagnose_capture,
+)
 from core.pktcap.dissect import dissect, match_filter
 from core.pktcap.pcapfile import PcapError, read_packets, write_pcap
 
@@ -89,6 +95,22 @@ def capability() -> dict:
             messages.append("未加载 libpcap，实时抓包不可用。仍可打开 pcap 文件。")
             if err:
                 hints.append(err)
+    if plat == "windows" and not live:
+        banner_short = "未安装 Npcap，无法实时抓包；打开 pcap 仍可用。"
+        banner_kind = "warn"
+    elif plat == "macos" and not live:
+        banner_short = "未能加载 libpcap，无法实时抓包；打开 pcap 仍可用。"
+        banner_kind = "warn"
+    elif plat == "macos" and live and messages and "bpf" in messages[0].lower():
+        banner_short = "实时抓包可能缺少 BPF 权限；打开 pcap 仍可用。"
+        banner_kind = "warn"
+    elif not live:
+        banner_short = "实时抓包不可用；打开 pcap 仍可用。"
+        banner_kind = "warn"
+    else:
+        banner_short = ""
+        banner_kind = ""
+
     hints.append("明文协议（如 HTTP、DNS、Telnet）可能含账号、密码或 Cookie，仅在本机分析，流量不会上传。")
     hints.append("本工具是独立实现的报文查看器，不是 Wireshark，也不会把流量发到云端。")
     return {
@@ -101,6 +123,8 @@ def capability() -> dict:
         "npcap_dir": npcap_dir,
         "npcap_url": NPCAP_URL,
         "can_offline": True,
+        "banner_short": banner_short,
+        "banner_kind": banner_kind,
         "messages": messages,
         "hints": hints,
         "presets": BPF_PRESETS,
@@ -208,6 +232,12 @@ def _summary_of(rec: dict) -> dict:
         "ip_dst": v.get("ip_dst") or "",
         "l4": v.get("l4") or "",
         "stream_key": v.get("stream_key"),
+        "tcp_flags": v.get("tcp_flags") or 0,
+        "tcp_seq": v.get("tcp_seq"),
+        "tcp_ack": v.get("tcp_ack"),
+        "tcp_window": v.get("tcp_window"),
+        "payload_len": v.get("payload_len") or 0,
+        "ttl": v.get("ttl"),
     }
 
 
@@ -438,6 +468,30 @@ def packet_summaries(after: int = 0, limit: int = 500, query: str = "") -> dict:
     )}}
 
 
+def _stream_views_locked(key) -> list[dict]:
+    if not key:
+        return []
+    out = []
+    for rec in SESS.packets:
+        try:
+            v = _ensure_view(rec)
+        except Exception:
+            continue
+        if v.get("stream_key") == key:
+            out.append(v)
+    return out
+
+
+def _analysis_fields(view: dict) -> dict:
+    keys = (
+        "no", "ts", "length", "caplen", "src", "dst", "protocol", "info",
+        "sport", "dport", "ip_src", "ip_dst", "l4", "stream_key",
+        "tcp_flags", "tcp_seq", "tcp_ack", "tcp_window", "payload_len", "ttl",
+        "layers",
+    )
+    return {k: view.get(k) for k in keys}
+
+
 def packet_detail(no: int) -> dict:
     no = int(no)
     with SESS.lock:
@@ -446,6 +500,8 @@ def packet_detail(no: int) -> dict:
             raise KeyError(f"没有序号为 {no} 的报文（可能已被上限策略丢弃）")
         view = _ensure_view(rec)
         raw = rec["data"]
+        peers = _stream_views_locked(view.get("stream_key"))
+    analysis = analyze_packet(view, raw=raw, stream=peers)
     return {
         "no": view["no"],
         "ts": view["ts"],
@@ -460,6 +516,108 @@ def packet_detail(no: int) -> dict:
         "sport": view.get("sport"),
         "dport": view.get("dport"),
         "stream_key": view.get("stream_key"),
+        "tcp_flags": view.get("tcp_flags") or 0,
+        "tcp_seq": view.get("tcp_seq"),
+        "tcp_ack": view.get("tcp_ack"),
+        "tcp_window": view.get("tcp_window"),
+        "payload_len": view.get("payload_len") or 0,
+        "ttl": view.get("ttl"),
+        "analysis": analysis,
+    }
+
+
+def diagnose(query: str = "") -> dict:
+    """对当前会话（可选显示过滤）做离线诊断。"""
+    query = (query or "").strip()
+    with SESS.lock:
+        recs = list(SESS.packets)
+    views = []
+    checksum_hits = []
+    for rec in recs:
+        try:
+            view = _ensure_view(rec)
+        except Exception:
+            continue
+        summary = {
+            "no": view["no"],
+            "ts": view["ts"],
+            "length": view["length"],
+            "caplen": view["caplen"],
+            "src": view["src"],
+            "dst": view["dst"],
+            "protocol": view["protocol"],
+            "info": view["info"],
+            "sport": view.get("sport"),
+            "dport": view.get("dport"),
+            "ip_src": view.get("ip_src") or "",
+            "ip_dst": view.get("ip_dst") or "",
+            "l4": view.get("l4") or "",
+            "stream_key": view.get("stream_key"),
+            "tcp_flags": view.get("tcp_flags") or 0,
+            "tcp_seq": view.get("tcp_seq"),
+            "tcp_ack": view.get("tcp_ack"),
+            "tcp_window": view.get("tcp_window"),
+            "payload_len": view.get("payload_len") or 0,
+            "ttl": view.get("ttl"),
+            "layers": view.get("layers"),
+        }
+        if query and not match_filter(summary, query):
+            continue
+        # 校验和提示（仅未截断）
+        for h in _checksum_hints(view, rec.get("data") or b""):
+            if h.get("level") == "error":
+                checksum_hits.append(f"第 {view.get('no')} 号 {h.get('text')}")
+        if checksum_hits and views is not None:
+            summary["_checksum_hints"] = [h for h in checksum_hits if f"第 {view.get('no')} 号" in h]
+        views.append(summary)
+    result = diagnose_capture(views, filtered=bool(query))
+    return result
+
+
+def deep_analyze_brief(no: int | None = None, query: str = "") -> dict:
+    """准备发给大模型的脱敏摘要。不含完整原始报文。"""
+    diag = diagnose(query=query)
+    stats = protocol_stats()
+    conv = conversations().get("conversations") or []
+    selected = None
+    selected_analysis = None
+    if no:
+        try:
+            detail = packet_detail(int(no))
+            selected = {
+                "no": detail["no"],
+                "protocol": detail["protocol"],
+                "src": detail["src"],
+                "dst": detail["dst"],
+                "length": detail["length"],
+                "info": detail["info"],
+            }
+            selected_analysis = detail.get("analysis")
+        except KeyError:
+            selected = None
+    with SESS.lock:
+        recs = list(SESS.packets)
+    summaries = []
+    for rec in recs:
+        try:
+            s = _summary_of(rec)
+        except Exception:
+            continue
+        if query and not match_filter(s, query):
+            continue
+        summaries.append(s)
+    text = build_ai_brief(
+        diag,
+        selected=selected,
+        selected_analysis=selected_analysis,
+        stats=stats,
+        conversations=conv,
+        more_packets=summaries,
+    )
+    return {
+        "text": text,
+        "count": diag.get("count") or 0,
+        "has_selection": bool(selected),
     }
 
 

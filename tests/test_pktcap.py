@@ -475,5 +475,144 @@ class TestImports(unittest.TestCase):
         self.assertTrue(lib is None or lib is not None)
 
 
+
+
+class TestAnalysis(unittest.TestCase):
+    def _open(self, frames, ts0=1_700_000_000.0):
+        blob = write_pcap([{"ts": ts0 + i * 0.001, "data": f} for i, f in enumerate(frames)])
+        session.clear_packets()
+        session.open_bytes(blob, name="analysis-test.pcap")
+        return session
+
+    def _detail(self, no):
+        d = session.packet_detail(no)
+        self.assertTrue(d.get("analysis"))
+        self.assertTrue(d["analysis"].get("summary"))
+        return d
+
+    def test_tcp_handshake_and_fin_ack(self):
+        syn = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("10.0.0.1", "10.0.0.2", 6, tcp_seg(40000, 443, 1000, 0, 0x02)))
+        synack = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                       ipv4_pkt("10.0.0.2", "10.0.0.1", 6, tcp_seg(443, 40000, 2000, 1001, 0x12)))
+        ack = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("10.0.0.1", "10.0.0.2", 6, tcp_seg(40000, 443, 1001, 2001, 0x10)))
+        fin = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("10.0.0.1", "10.0.0.2", 6, tcp_seg(40000, 443, 1001, 2001, 0x11)))
+        self._open([syn, synack, ack, fin])
+        a1 = self._detail(1)["analysis"]
+        self.assertIn("SYN", a1["summary"])
+        self.assertIn("第一", a1["summary"])
+        a2 = self._detail(2)["analysis"]
+        self.assertIn("SYN-ACK", a2["summary"])
+        self.assertIn("第二", a2["summary"])
+        a3 = self._detail(3)["analysis"]
+        self.assertIn("ACK", a3["summary"])
+        self.assertTrue(any("纯 ACK" in (h.get("text") or "") or "第三拍" in a3["summary"] for h in a3["hints"]) or "第三拍" in a3["summary"])
+        a4 = self._detail(4)["analysis"]
+        self.assertIn("FIN", a4["summary"])
+        self.assertTrue("关闭" in a4["summary"] or any("FIN" in (h.get("text") or "") for h in a4["hints"]))
+        diag = session.diagnose()
+        titles = [c["title"] for c in diag["conclusions"]]
+        self.assertIn("TCP 握手", titles)
+        handshake = next(c for c in diag["conclusions"] if c["title"] == "TCP 握手")
+        self.assertIn("完成", handshake["detail"])
+        closing = next(c for c in diag["conclusions"] if c["title"] == "连接关闭")
+        self.assertIn("FIN", closing["detail"])
+
+    def test_pure_ack_and_dns_http_arp_icmp_tls(self):
+        # 独立的无载荷 ACK（无握手上下文时也应给出非空说明）
+        ack = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("192.0.2.10", "192.0.2.20", 6, tcp_seg(12345, 80, 50, 9, 0x10)))
+        dns_q = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("192.0.2.10", "192.0.2.53", 17, udp_dgram(53000, 53, dns_query("www.example.com"))))
+        dns_a = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                      ipv4_pkt("192.0.2.53", "192.0.2.10", 17, udp_dgram(53, 53000, dns_answer("www.example.com", "93.184.216.34"))))
+        http = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                     ipv4_pkt("192.0.2.10", "192.0.2.20", 6, tcp_seg(54321, 80, 1000, 1, 0x18, http_get("/hello", "www.example.com"))))
+        arp = eth("ff:ff:ff:ff:ff:ff", "02:00:00:00:00:01", 0x0806, arp_who_has("192.168.1.10", "192.168.1.1"))
+        icmp = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                     ipv4_pkt("10.0.0.1", "10.0.0.2", 1, icmp_echo(8, 7, 9, b"ping")))
+        # ICMP dest unreachable type 3 code 1
+        unreach = struct.pack("!BBHHH", 3, 1, 0, 0, 0) + b"\x00" * 8
+        unreach = unreach[:2] + struct.pack("!H", checksum(unreach)) + unreach[4:]
+        icmp_un = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                        ipv4_pkt("10.0.0.2", "10.0.0.1", 1, unreach))
+        tls = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("192.0.2.10", "192.0.2.20", 6, tcp_seg(41000, 443, 1, 1, 0x18, tls_client_hello("example.com"))))
+        self._open([ack, dns_q, dns_a, http, arp, icmp, icmp_un, tls])
+
+        a_ack = self._detail(1)["analysis"]
+        self.assertTrue(a_ack["summary"])
+        self.assertTrue("ACK" in a_ack["summary"] or any("ACK" in (h.get("text") or "") for h in a_ack["hints"]))
+
+        a_dq = self._detail(2)["analysis"]
+        self.assertIn("DNS", a_dq["summary"])
+        self.assertIn("查询", a_dq["summary"])
+        self.assertIn("www.example.com", a_dq["summary"])
+
+        a_da = self._detail(3)["analysis"]
+        self.assertIn("应答", a_da["summary"])
+        self.assertIn("www.example.com", a_da["summary"])
+
+        a_http = self._detail(4)["analysis"]
+        self.assertIn("HTTP", a_http["summary"])
+        self.assertIn("GET", a_http["summary"])
+        self.assertIn("www.example.com", a_http["summary"])
+
+        a_arp = self._detail(5)["analysis"]
+        self.assertIn("ARP", a_arp["summary"])
+        self.assertTrue("请求" in a_arp["summary"] or "Who has" in (a_arp["summary"] + str(a_arp["points"])))
+        self.assertIn("192.168.1.1", a_arp["summary"])
+
+        a_icmp = self._detail(6)["analysis"]
+        self.assertTrue("回显请求" in a_icmp["summary"] or "ping" in a_icmp["summary"].lower())
+
+        a_un = self._detail(7)["analysis"]
+        self.assertIn("不可达", a_un["summary"])
+
+        a_tls = self._detail(8)["analysis"]
+        self.assertIn("TLS", a_tls["summary"])
+        self.assertIn("example.com", a_tls["summary"])
+        self.assertIn("不解密", a_tls["summary"])
+
+        diag = session.diagnose()
+        self.assertGreaterEqual(diag["count"], 8)
+        titles = [c["title"] for c in diag["conclusions"]]
+        self.assertTrue(any("HTTP" in t for t in titles))
+        self.assertTrue(any("DNS" in t for t in titles))
+        self.assertTrue(any("SNI" in t or "TLS" in t for t in titles))
+        self.assertTrue(any("不可达" in t for t in titles))
+        brief = session.deep_analyze_brief(no=4)
+        self.assertIn("离线诊断", brief["text"])
+        self.assertNotIn("raw_b64", brief["text"])
+        self.assertGreater(brief["count"], 0)
+
+    def test_rst_and_retransmit_in_diagnosis(self):
+        syn = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("10.1.1.1", "10.1.1.2", 6, tcp_seg(2000, 22, 10, 0, 0x02)))
+        rst = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                    ipv4_pkt("10.1.1.2", "10.1.1.1", 6, tcp_seg(22, 2000, 0, 11, 0x14)))
+        data = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                     ipv4_pkt("10.2.2.1", "10.2.2.2", 6, tcp_seg(3000, 80, 500, 1, 0x18, b"hello-world")))
+        retr = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                     ipv4_pkt("10.2.2.1", "10.2.2.2", 6, tcp_seg(3000, 80, 500, 1, 0x18, b"hello-world")))
+        self._open([syn, rst, data, retr])
+        a_rst = self._detail(2)["analysis"]
+        self.assertIn("RST", a_rst["summary"])
+        a_re = self._detail(4)["analysis"]
+        self.assertTrue(any("重传" in (h.get("text") or "") for h in a_re["hints"]) or "重传" in a_re["summary"])
+        diag = session.diagnose()
+        titles = [c["title"] for c in diag["conclusions"]]
+        self.assertTrue(any("重置" in t or "RST" in t for t in titles))
+        self.assertTrue(any("重传" in t for t in titles))
+
+    def tearDown(self):
+        try:
+            session.clear_packets()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

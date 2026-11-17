@@ -257,6 +257,6 @@ TOOLS.push(
 TOOLS.push(
   {
     id: 'pcap', name: '抓包分析', color: 'red', icon: 'pcap', group: 'detect',
-    sub: '报文列表 · 逐层解析 · pcap', mode: 'panel'
+    sub: '报文列表 · 分析与离线诊断 · 逐层详情 · pcap', mode: 'panel'
   }
 );

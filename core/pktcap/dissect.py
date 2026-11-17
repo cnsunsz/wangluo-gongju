@@ -176,9 +176,12 @@ class _Ctx:
         self.tcp_flags = 0
         self.tcp_seq: int | None = None
         self.tcp_ack: int | None = None
+        self.tcp_window: int | None = None
         self.payload_off: int | None = None
         self.payload_len = 0
         self.stream_key: tuple | None = None
+        self.ttl: int | None = None
+        self.ip_version: int | None = None
 
 
 def dissect(raw: bytes, *, ts: float = 0.0, number: int = 1,
@@ -234,9 +237,12 @@ def dissect(raw: bytes, *, ts: float = 0.0, number: int = 1,
         "tcp_flags": ctx.tcp_flags,
         "tcp_seq": ctx.tcp_seq,
         "tcp_ack": ctx.tcp_ack,
+        "tcp_window": ctx.tcp_window,
         "payload_off": ctx.payload_off,
         "payload_len": ctx.payload_len,
         "stream_key": ctx.stream_key,
+        "ttl": ctx.ttl,
+        "ip_version": ctx.ip_version,
     }
 
 
@@ -424,6 +430,8 @@ def _ipv4(data: bytes, off: int, layers: list, ctx: _Ctx) -> None:
     ctx.ip_src = src
     ctx.ip_dst = dst
     ctx.protocol = "IPv4"
+    ctx.ip_version = 4
+    ctx.ttl = ttl
     flag_names = []
     if flags & 0x2:
         flag_names.append("DF")
@@ -492,6 +500,8 @@ def _ipv6(data: bytes, off: int, layers: list, ctx: _Ctx) -> None:
     ctx.ip_src = src
     ctx.ip_dst = dst
     ctx.protocol = "IPv6"
+    ctx.ip_version = 6
+    ctx.ttl = hlim
     children = [
         node("Version", str(ver), off, 4),
         node("Traffic Class", f"0x{tc:02x}", off, 4, children=[
@@ -615,6 +625,7 @@ def _tcp(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
     ctx.tcp_flags = flags
     ctx.tcp_seq = seq
     ctx.tcp_ack = ack
+    ctx.tcp_window = window
     _set_stream(ctx, "TCP")
     names = _tcp_flag_names(flags)
     flag_s = ", ".join(names) if names else "无"

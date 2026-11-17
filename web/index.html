@@ -79,9 +79,12 @@
         <option value="dashscope">阿里云百炼（qwen-plus）</option>
         <option value="deepseek">DeepSeek（deepseek-chat）</option>
         <option value="openai">OpenAI（gpt-4o-mini）</option>
+        <option value="mimo">小米 MiMo（mimo-v2.6-pro）</option>
+        <option value="grok">Grok（grok-4.7）</option>
         <option value="ollama">本地 Ollama（qwen2.5:7b）</option>
         <option value="custom">自定义</option>
       </select>
+      <p class="modal-note pcap-preset-note" id="aiPresetNote" hidden></p>
       <label for="aiBase">接口地址（OpenAI 兼容）</label>
       <input id="aiBase" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
       <label for="aiModel">模型</label>
@@ -90,7 +93,7 @@
       <input id="aiKey" type="password" placeholder="已保存时留空即保持不变">
       <label for="aiSystem">系统提示（可选）</label>
       <textarea id="aiSystem" rows="3" placeholder="留空使用内置网络运维提示词"></textarea>
-      <p class="modal-note">Key 仅保存在本机配置目录（config/ai.json），不会上传；分析时只发送当前工具的输出，不发送其他文件。</p>
+      <p class="modal-note">Key 仅保存在本机配置目录（config/ai.json），不会上传；分析时只发送当前工具的输出或抓包的脱敏摘要，不发送其他文件，也不会把完整原始报文无限制发给模型。</p>
       <div class="modal-msg" id="aiMsg"></div>
     </div>
     <div class="modal-foot">

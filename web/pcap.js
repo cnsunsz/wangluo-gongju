@@ -1,4 +1,4 @@
-/* 抓包分析：类 Wireshark 三栏（列表 / 逐层解析 / 字节） */
+/* 抓包分析：列表 / 报文分析（含离线诊断） / 逐层详情 / 字节 */
 window.PANELS = window.PANELS || {};
 
 (function () {
@@ -25,7 +25,8 @@ window.PANELS = window.PANELS || {};
   let firstTs = 0;
   let cap = null;
   let listAtBottom = true;
-  let splitRatios = [0.42, 0.33, 0.25];
+  let splitRatios = [0.44, 0.36, 0.20];
+  let midRatio = 0.48;
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -72,27 +73,50 @@ window.PANELS = window.PANELS || {};
   function showBanner(capInfo) {
     const box = $id('pcapBanner');
     if (!box || !capInfo) return;
+    const short = capInfo.banner_short || '';
     const msgs = (capInfo.messages || []).slice();
     const hints = capInfo.hints || [];
-    if (!msgs.length && !hints.length) { box.hidden = true; box.innerHTML = ''; return; }
-    let html = msgs.map(m => '<div>' + esc(m) + '</div>').join('');
-    if (!capInfo.live_available && capInfo.platform === 'windows') {
-      html += '<div>请前往 <a href="https://npcap.com/" id="pcapNpcapLink">https://npcap.com/</a> 安装 Npcap。打开 pcap 文件不需要安装。</div>';
+    if (capInfo.live_available && !short) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
     }
-    if (hints.length) {
-      html += '<ul>' + hints.map(h => '<li>' + esc(h) + '</li>').join('') + '</ul>';
+    const line = short || msgs[0] || '打开 pcap 仍可用于离线分析。';
+    const url = capInfo.npcap_url || 'https://npcap.com/';
+    const needLink = !capInfo.live_available && capInfo.platform === 'windows';
+    let html = '<div class="pcap-banner-line"><span class="pcap-banner-msg">' + esc(line) + '</span>';
+    if (needLink) html += '<a href="' + esc(url) + '" id="pcapNpcapLink">Npcap 官网</a>';
+    const details = [];
+    msgs.forEach(m => { if (m && m !== line) details.push(m); });
+    hints.forEach(h => { if (h) details.push(h); });
+    if (details.length) html += '<button type="button" class="btn ghost small" id="pcapBannerMore">详情</button>';
+    html += '<button type="button" class="btn ghost small pcap-banner-x" id="pcapBannerClose" title="关闭提示">×</button></div>';
+    if (details.length) {
+      html += '<div class="pcap-banner-detail" id="pcapBannerDetail" hidden><ul>' +
+        details.map(h => '<li>' + esc(h) + '</li>').join('') + '</ul></div>';
     }
     box.innerHTML = html;
     box.hidden = false;
-    box.className = 'pcap-banner' + (capInfo.live_available ? '' : ' warn');
+    box.className = 'pcap-banner' + ((capInfo.banner_kind || (!capInfo.live_available ? 'warn' : '')) ? ' ' + (capInfo.banner_kind || 'warn') : '');
     const link = $id('pcapNpcapLink');
     if (link) {
       link.addEventListener('click', ev => {
         ev.preventDefault();
-        if (typeof openInApp === 'function') openInApp('https://npcap.com/', 'Npcap');
-        else window.open('https://npcap.com/');
+        if (typeof openInApp === 'function') openInApp(url, 'Npcap');
+        else window.open(url);
       });
     }
+    const more = $id('pcapBannerMore');
+    if (more) {
+      more.addEventListener('click', () => {
+        const d = $id('pcapBannerDetail');
+        if (!d) return;
+        d.hidden = !d.hidden;
+        more.textContent = d.hidden ? '详情' : '收起';
+      });
+    }
+    const clo = $id('pcapBannerClose');
+    if (clo) clo.addEventListener('click', () => { box.hidden = true; });
   }
 
   async function loadCapability() {
@@ -233,7 +257,9 @@ window.PANELS = window.PANELS || {};
     renderList();
     const tree = $id('pcapTree');
     const bytes = $id('pcapBytes');
+    const ana = $id('pcapPktAnaBody');
     if (tree) tree.innerHTML = '<div class="pcap-empty">正在解析…</div>';
+    if (ana) ana.innerHTML = '<div class="pcap-empty">正在分析…</div>';
     try {
       const r = await fetch('/api/pcap/packet/' + no);
       const d = await r.json();
@@ -243,9 +269,13 @@ window.PANELS = window.PANELS || {};
       rawBytes = b64ToBytes(d.raw_b64 || '');
       highlight = null;
       renderTree(d.layers || []);
+      if (tree) tree.scrollTop = 0;
       renderBytes();
+      if (bytes) bytes.scrollTop = 0;
+      renderPacketAnalysis(d.analysis);
     } catch (e) {
       if (tree) tree.innerHTML = '<div class="pcap-empty err">' + esc(e.message || e) + '</div>';
+      if (ana) ana.innerHTML = '<div class="pcap-empty err">' + esc(e.message || e) + '</div>';
     }
   }
 
@@ -433,6 +463,7 @@ window.PANELS = window.PANELS || {};
     renderList();
     const body = $id('pcapListBody');
     if (body && running && listAtBottom) body.scrollTop = body.scrollHeight;
+    if (add.length || reset) scheduleDiagnose();
     return d;
   }
 
@@ -497,10 +528,13 @@ window.PANELS = window.PANELS || {};
       rawBytes = new Uint8Array(0);
       applyStatus(d);
       renderList();
+      scheduleDiagnose();
       const tree = $id('pcapTree');
       const bytes = $id('pcapBytes');
+      const ana = $id('pcapPktAnaBody');
       if (tree) tree.innerHTML = '<div class="pcap-empty">选择一条报文，查看逐层字段</div>';
       if (bytes) bytes.innerHTML = '<div class="pcap-empty">选择一条报文以查看原始字节</div>';
+      if (ana) ana.innerHTML = '<div class="pcap-empty">选择一条报文，查看这条报文在做什么</div>';
     } catch (e) {
       setPcapStatus(e.message || String(e), 'err');
     }
@@ -561,6 +595,7 @@ window.PANELS = window.PANELS || {};
     applyStatus(d);
     await pull(true);
     if (packets.length) selectPacket(packets[0].no);
+    scheduleDiagnose();
     toast('已载入 ' + (d.count || packets.length) + ' 个报文');
   }
 
@@ -656,32 +691,145 @@ window.PANELS = window.PANELS || {};
     }
   }
 
+  function renderPacketAnalysis(ana) {
+    const box = $id('pcapPktAnaBody');
+    if (!box) return;
+    if (!ana || !ana.summary) {
+      box.innerHTML = '<div class="pcap-empty">没有分析说明</div>';
+      return;
+    }
+    let html = '<p class="pcap-ana-summary">' + esc(ana.summary) + '</p>';
+    if (ana.points && ana.points.length) {
+      html += '<ul class="pcap-ana-points">' + ana.points.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>';
+    }
+    if (ana.hints && ana.hints.length) {
+      html += '<ul class="pcap-ana-hints">' + ana.hints.map(h =>
+        '<li class="' + esc(h.level || 'note') + '">' + esc(h.text) + '</li>').join('') + '</ul>';
+    }
+    box.innerHTML = html;
+  }
+
+  let diagTimer = null;
+  function scheduleDiagnose() {
+    if (diagTimer) clearTimeout(diagTimer);
+    diagTimer = setTimeout(loadDiagnose, 280);
+  }
+
+  async function loadDiagnose() {
+    const body = $id('pcapDiagBody');
+    if (!body) return;
+    if (!packets.length) {
+      body.innerHTML = '<div class="pcap-empty">打开或抓取报文后，将在此给出整次抓包的结论</div>';
+      return;
+    }
+    const q = ($id('pcapFilter') && $id('pcapFilter').value) || '';
+    try {
+      const r = await fetch('/api/pcap/diagnose?q=' + encodeURIComponent(q));
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || '诊断失败');
+      const list = d.conclusions || [];
+      if (!list.length) {
+        body.innerHTML = '<div class="pcap-empty">暂无结论</div>';
+        return;
+      }
+      body.innerHTML = '<ul class="pcap-diag-list">' + list.map(c =>
+        '<li class="pcap-diag-item ' + esc(c.level || 'info') + '"><b>' + esc(c.title) +
+        '</b><span>' + esc(c.detail) + '</span>' +
+        (c.evidence ? '<small>依据：' + esc(c.evidence) + '</small>' : '') +
+        '</li>').join('') + '</ul>';
+    } catch (e) {
+      body.innerHTML = '<div class="pcap-empty err">' + esc(e.message || e) + '</div>';
+    }
+  }
+
+  async function deepAnalyze() {
+    if (!packets.length) { toast('请先打开 pcap 或开始抓包'); return; }
+    const q = ($id('pcapFilter') && $id('pcapFilter').value) || '';
+    try {
+      const cfgR = await fetch('/api/ai/config');
+      const cfg = await cfgR.json();
+      if (!cfg.configured) {
+        if (typeof openAiSettings === 'function') openAiSettings();
+        toast('请先在 AI 设置中配置接口后再做深度分析');
+        return;
+      }
+    } catch (e) { /* 仍尝试请求，由接口返回引导 */ }
+    openModal(
+      '深度分析',
+      '<p class="pcap-meta">将脱敏后的摘要、离线诊断和统计发给已配置的模型，不会发送完整原始报文。</p>' +
+      '<pre class="pcap-follow" id="pcapAiText"></pre>'
+    );
+    const textEl = () => $id('pcapAiText');
+    try {
+      const resp = await fetch('/api/pcap/deep-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ no: selectedNo || 0, filter: q })
+      });
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
+      if (!resp.ok && ct.indexOf('json') >= 0) {
+        const d = await resp.json();
+        if (d.need_config && typeof openAiSettings === 'function') {
+          closeModal();
+          openAiSettings();
+        }
+        throw new Error(d.error || '无法开始深度分析');
+      }
+      if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const chunk = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const line = chunk.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          let ev;
+          try { ev = JSON.parse(line.slice(6)); } catch (err) { continue; }
+          if (ev.type === 'delta' && textEl()) textEl().textContent += ev.text;
+          else if (ev.type === 'error') throw new Error(ev.message || '分析失败');
+        }
+      }
+      if (textEl() && !textEl().textContent) textEl().textContent = '模型没有返回内容。';
+    } catch (e) {
+      if (textEl()) textEl().textContent += (textEl().textContent ? '\n\n' : '') + '错误：' + (e.message || e);
+      else toast(e.message || '深度分析失败');
+    }
+  }
+
   function bindSplitters(root) {
-    const panes = [
-      $id('pcapListPane'),
-      $id('pcapTreePane'),
-      $id('pcapBytesPane')
-    ];
+    const list = $id('pcapListPane');
+    const mid = $id('pcapMid');
+    const bytes = $id('pcapBytesPane');
+    const analysis = $id('pcapAnalysisPane');
+    const tree = $id('pcapTreePane');
     function apply() {
       const s = splitRatios[0] + splitRatios[1] + splitRatios[2];
-      panes[0].style.flex = splitRatios[0] / s + ' 1 0';
-      panes[1].style.flex = splitRatios[1] / s + ' 1 0';
-      panes[2].style.flex = splitRatios[2] / s + ' 1 0';
+      if (list) list.style.flex = (splitRatios[0] / s) + ' 1 0';
+      if (mid) mid.style.flex = (splitRatios[1] / s) + ' 1 0';
+      if (bytes) bytes.style.flex = (splitRatios[2] / s) + ' 1 0';
+      if (analysis) analysis.style.flex = midRatio + ' 1 0';
+      if (tree) tree.style.flex = (1 - midRatio) + ' 1 0';
     }
     apply();
-    root.querySelectorAll('.pcap-split').forEach(h => {
+    root.querySelectorAll('.pcap-split-h').forEach(h => {
       h.addEventListener('mousedown', ev => {
         ev.preventDefault();
         const idx = Number(h.dataset.split) || 1;
         const startY = ev.clientY;
         const start = splitRatios.slice();
-        const total = root.querySelector('.pcap-panes').clientHeight || 1;
+        const total = (root.querySelector('.pcap-panes') || {}).clientHeight || 1;
         function move(e) {
           const dy = e.clientY - startY;
           const df = dy / total;
           const a = start[idx - 1] + df;
           const b = start[idx] - df;
-          if (a < 0.12 || b < 0.12) return;
+          if (a < 0.16 || b < 0.16) return;
           splitRatios[idx - 1] = a;
           splitRatios[idx] = b;
           apply();
@@ -694,16 +842,52 @@ window.PANELS = window.PANELS || {};
         document.addEventListener('mouseup', up);
       });
     });
+    const v = root.querySelector('.pcap-split-v');
+    if (v) {
+      v.addEventListener('mousedown', ev => {
+        ev.preventDefault();
+        const midEl = $id('pcapMid');
+        if (!midEl) return;
+        const stacked = getComputedStyle(midEl).flexDirection === 'column';
+        const startPos = stacked ? ev.clientY : ev.clientX;
+        const start = midRatio;
+        const total = stacked ? (midEl.clientHeight || 1) : (midEl.clientWidth || 1);
+        function move(e) {
+          const d = ((stacked ? e.clientY : e.clientX) - startPos) / total;
+          let next = start + d;
+          if (next < 0.28) next = 0.28;
+          if (next > 0.72) next = 0.72;
+          midRatio = next;
+          apply();
+        }
+        function up() {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+        }
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+      });
+    }
   }
 
   function mount(panel) {
     panel.innerHTML = `
       <div class="pcap-app">
         <div class="pcap-banner" id="pcapBanner" hidden></div>
-        <div class="pcap-toolbar">
+        <div class="pcap-toolbar pcap-toolbar-main">
           <label>网卡 <select id="pcapIface"></select></label>
-          <button type="button" class="btn ghost small" id="pcapRefreshIf">刷新网卡</button>
-          <label>过滤 <select id="pcapPreset"></select></label>
+          <button type="button" class="btn ghost small" id="pcapRefreshIf">刷新</button>
+          <span class="pcap-actions">
+            <button type="button" class="btn primary small" id="pcapStart">开始抓包</button>
+            <button type="button" class="btn ghost small" id="pcapStop" disabled>停止</button>
+            <button type="button" class="btn ghost small" id="pcapClear">清空</button>
+            <button type="button" class="btn ghost small" id="pcapOpen">打开 pcap</button>
+            <button type="button" class="btn ghost small" id="pcapSave">保存 pcap</button>
+          </span>
+          <input type="file" id="pcapFile" hidden accept=".pcap,.pcapng,.cap,application/vnd.tcpdump.pcap">
+        </div>
+        <div class="pcap-toolbar pcap-toolbar-filters">
+          <label>捕获过滤 <select id="pcapPreset"></select></label>
           <input id="pcapBpf" type="text" placeholder="自定义 BPF，例如 tcp port 443" spellcheck="false">
           <label>上限 <input id="pcapMax" type="number" min="100" max="200000" value="10000" title="内存中最多保留的报文数"></label>
           <label>到达上限
@@ -712,22 +896,20 @@ window.PANELS = window.PANELS || {};
               <option value="stop">停止抓包</option>
             </select>
           </label>
-          <button type="button" class="btn primary small" id="pcapStart">开始抓包</button>
-          <button type="button" class="btn ghost small" id="pcapStop" disabled>停止</button>
-          <button type="button" class="btn ghost small" id="pcapClear">清空</button>
-          <button type="button" class="btn ghost small" id="pcapOpen">打开 pcap</button>
-          <button type="button" class="btn ghost small" id="pcapSave">保存 pcap</button>
-          <button type="button" class="btn ghost small" id="pcapFollow">跟踪 TCP 流</button>
-          <button type="button" class="btn ghost small" id="pcapStats">统计</button>
-          <input type="file" id="pcapFile" hidden accept=".pcap,.pcapng,.cap,application/vnd.tcpdump.pcap">
+          <span class="pcap-actions">
+            <button type="button" class="btn ghost small" id="pcapFollow">跟踪 TCP 流</button>
+            <button type="button" class="btn ghost small" id="pcapStats">统计</button>
+            <button type="button" class="btn ghost small" id="pcapDeep">深度分析</button>
+          </span>
         </div>
         <div class="pcap-filter-row">
-          <input id="pcapFilter" type="search" placeholder="显示过滤：协议、地址、端口或关键字，例如 tcp port 80、ip.addr==10.0.0.1、dns" spellcheck="false">
+          <label>显示过滤</label>
+          <input id="pcapFilter" type="search" placeholder="协议、地址、端口或关键字，例如 tcp port 80、ip.addr==10.0.0.1、dns" spellcheck="false">
           <span id="pcapCount">0 包</span>
           <span class="pcap-status" id="pcapStatus">就绪（不会自动开始抓包）</span>
         </div>
         <div class="pcap-panes">
-          <div class="pcap-pane" id="pcapListPane">
+          <div class="pcap-pane pcap-list-pane" id="pcapListPane">
             <div class="pcap-list-head">
               <span class="c-no">序号</span><span class="c-time">时间</span><span class="c-src">源地址</span>
               <span class="c-dst">目的地址</span><span class="c-proto">协议</span><span class="c-len">长度</span>
@@ -738,12 +920,28 @@ window.PANELS = window.PANELS || {};
               <div id="pcapListRows" class="pcap-list-rows"></div>
             </div>
           </div>
-          <div class="pcap-split" data-split="1" title="拖动调整高度"></div>
-          <div class="pcap-pane pcap-tree-pane" id="pcapTreePane">
-            <div class="pcap-pane-label">报文详情（逐层）</div>
-            <div class="pcap-tree" id="pcapTree"><div class="pcap-empty">选择一条报文，查看逐层字段</div></div>
+          <div class="pcap-split pcap-split-h" data-split="1" title="拖动调整高度"></div>
+          <div class="pcap-mid" id="pcapMid">
+            <div class="pcap-pane pcap-analysis-pane" id="pcapAnalysisPane">
+              <div class="pcap-pane-label">报文分析</div>
+              <div class="pcap-analysis" id="pcapAnalysis">
+                <section class="pcap-diag">
+                  <h3>离线诊断</h3>
+                  <div id="pcapDiagBody"><div class="pcap-empty">打开或抓取报文后，将在此给出整次抓包的结论</div></div>
+                </section>
+                <section class="pcap-pkt-ana">
+                  <h3>本包说明</h3>
+                  <div id="pcapPktAnaBody"><div class="pcap-empty">选择一条报文，查看这条报文在做什么</div></div>
+                </section>
+              </div>
+            </div>
+            <div class="pcap-split pcap-split-v" data-split="mid" title="拖动调整宽度"></div>
+            <div class="pcap-pane pcap-tree-pane" id="pcapTreePane">
+              <div class="pcap-pane-label">报文详情</div>
+              <div class="pcap-tree" id="pcapTree"><div class="pcap-empty">选择一条报文，查看逐层字段</div></div>
+            </div>
           </div>
-          <div class="pcap-split" data-split="2" title="拖动调整高度"></div>
+          <div class="pcap-split pcap-split-h" data-split="2" title="拖动调整高度"></div>
           <div class="pcap-pane pcap-bytes-pane" id="pcapBytesPane">
             <div class="pcap-pane-label">报文字节</div>
             <div class="pcap-bytes" id="pcapBytes"><div class="pcap-empty">选择一条报文以查看原始字节</div></div>
@@ -760,8 +958,13 @@ window.PANELS = window.PANELS || {};
     const view = $id('toolView');
     if (view) view.classList.add('pcap-mode');
     const runBar = document.querySelector('#toolView .run-bar');
-    if (runBar) runBar.hidden = true;
-    ['exportBtn', 'aiBtn', 'pkgBtn', 'cmpBtn'].forEach(id => { const b = $id(id); if (b) b.hidden = true; });
+    if (runBar) {
+      runBar.hidden = true;
+      runBar.setAttribute('hidden', '');
+    }
+    ['runBtn', 'stopBtn', 'clearBtn', 'exportBtn', 'aiBtn', 'pkgBtn', 'cmpBtn'].forEach(id => {
+      const b = $id(id); if (b) b.hidden = true;
+    });
 
     $id('pcapStart').onclick = startCap;
     $id('pcapStop').onclick = stopCap;
@@ -770,6 +973,7 @@ window.PANELS = window.PANELS || {};
     $id('pcapSave').onclick = savePcap;
     $id('pcapFollow').onclick = followStream;
     $id('pcapStats').onclick = showStats;
+    $id('pcapDeep').onclick = deepAnalyze;
     $id('pcapRefreshIf').onclick = () => loadCapability();
     $id('pcapPreset').onchange = () => {
       if (!$id('pcapBpf').value || $id('pcapBpf').dataset.fromPreset === '1') {
@@ -778,7 +982,7 @@ window.PANELS = window.PANELS || {};
       }
     };
     $id('pcapBpf').addEventListener('input', () => { $id('pcapBpf').dataset.fromPreset = '0'; });
-    $id('pcapFilter').addEventListener('input', () => renderList());
+    $id('pcapFilter').addEventListener('input', () => { renderList(); scheduleDiagnose(); });
     $id('pcapFile').addEventListener('change', ev => {
       const f = ev.target.files && ev.target.files[0];
       ev.target.value = '';
@@ -842,6 +1046,7 @@ window.PANELS = window.PANELS || {};
       pull(true).then(d => {
         if (d && d.running) startPoll();
         if (packets.length) selectPacket(packets[0].no);
+        scheduleDiagnose();
       }).catch(() => {});
     });
   }
@@ -859,6 +1064,7 @@ window.PANELS = window.PANELS || {};
 
   function unmount() {
     stopPoll();
+    if (diagTimer) { clearTimeout(diagTimer); diagTimer = null; }
     const view = $id('toolView');
     if (view) view.classList.remove('pcap-mode');
     const runBar = document.querySelector('#toolView .run-bar');

@@ -145,9 +145,16 @@ jobs:
             - Windows：`%LOCALAPPDATA%\网络工具\`
             - macOS：`~/Library/Application Support/网络工具/`
 
-            ## 1.2.3 更新
+            ## 1.2.4 更新
 
-            - **抓包分析**：类 Wireshark 三栏视图（报文列表、逐层 Packet Details、十六进制/ASCII 字节）。点击报文可解析 Frame / Ethernet / IPv4 或 IPv6 / TCP、UDP、ICMP / ARP / DNS / HTTP，以及常见 TLS 握手字段（记录类型、版本、SNI；解不出会标明「未解出」）。点选字段会尽量高亮对应字节。支持显示过滤、协议与会话统计、跟踪 TCP 流，以及打开 / 保存 `.pcap`（常见 `.pcapng` 也可读）。
+            - **布局**：抓包页不再挤成一条缝。Npcap 提示改为一行可展开的短横幅；工具栏拆行；隐藏底部重复的通用「开始 / 停止 / 清空」。同一页分为报文列表、报文分析、报文详情、报文字节，宽屏时分析与详情左右并排，分隔条可拖动。
+            - **报文分析与离线诊断**：选中报文后用中文说明这条报文在做什么（握手、FIN/RST、HTTP、DNS、TLS SNI 等），并由本机规则对整次抓包给出若干带依据的结论。不依赖 AI，也不联网。
+            - **深度分析（可选）**：把脱敏摘要发给「AI 设置」中已配置的 OpenAI 兼容接口。未配置会引导去设置。密钥只存在本机；不把完整原始报文无限制发给模型。
+            - **AI 预设**：新增小米 MiMo（`https://api.xiaomimimo.com/v1`，`mimo-v2.6-pro`）和 Grok（`https://api.x.ai/v1`，`grok-4.7`）。保留百炼、DeepSeek、OpenAI、Ollama 与自定义。
+
+            ## 1.2.3 已有能力
+
+            - **抓包分析**：类 Wireshark 的报文列表、逐层 Packet Details、十六进制/ASCII 字节。点击报文可解析 Frame / Ethernet / IPv4 或 IPv6 / TCP、UDP、ICMP / ARP / DNS / HTTP，以及常见 TLS 握手字段（记录类型、版本、SNI；解不出会标明「未解出」）。点选字段会尽量高亮对应字节。支持显示过滤、协议与会话统计、跟踪 TCP 流，以及打开 / 保存 `.pcap`（常见 `.pcapng` 也可读）。
             - **实时抓包可选、不会自动开始**：可选网卡与 BPF 过滤。流量只在本机分析，不会上传。默认最多保留 10000 个包，超限丢弃最旧或停止并提示。
             - **不内置 Npcap**：Windows 实时抓包请自行安装 https://npcap.com/ 。未安装或缺少权限时仍可打开 pcap 做离线分析。macOS 使用系统 libpcap，缺少 BPF 权限时会提示。明文协议可能含账号、密码或 Cookie，请仅在本机分析。
 

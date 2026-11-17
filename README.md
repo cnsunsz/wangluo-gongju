@@ -2,7 +2,14 @@
 
 桌面网络工具箱（作者：Lorenzo），提供 **Windows** 与 **macOS** 版本。在本地打开独立窗口，内置 Ping、traceroute、端口扫描、HTTP 探测、DNS、测速、系统体检、抓包分析、网卡叠加、SSH、服务器信息提取等功能（Windows 共 48 项；macOS 隐藏仅 Windows 可用的「Windows 诊断」和「WLAN 分析」）。
 
-当前版本：**1.2.3**。
+当前版本：**1.2.4**。
+
+## 1.2.4 主要变化
+
+- **抓包页布局**：把原来挤在一起的界面拆开。Npcap 提示改为一行可展开、可关闭的短横幅；工具栏分成「网卡与开始/停止/打开保存」和「过滤 / 上限 / 跟踪流 / 统计 / 深度分析」两行；抓包页隐藏底部通用的「开始 / 停止 / 清空 / 就绪」，避免和工具栏按钮重复。同一页内分为报文列表、报文分析、报文详情、报文字节四块，宽屏时分析与详情左右并排，均可拖动分隔条，默认高度能看清多层字段和多行十六进制。
+- **报文分析与离线诊断**：选中一条报文后，「报文分析」用中文说明这条报文在做什么（例如 TCP 握手的 SYN / SYN-ACK / ACK、FIN 关闭、RST、HTTP 请求、DNS 查询或应答、TLS ClientHello 的 SNI），并给出传统规则提示（纯 ACK、零窗口、可能的重传、校验和异常等）。同时对当前打开或抓到的报文（若设置了显示过滤，则针对可见集合）给出若干离线诊断结论，例如握手是否完成、连接是否在关闭、是否出现 RST / 重传、主要协议与 HTTP / DNS / TLS SNI 等可确定的事实。分析由本机规则引擎生成，不调用 AI，也不联网。
+- **深度分析（可选）**：抓包页增加「深度分析」，把脱敏后的摘要、统计和离线结论发给已在「AI 设置」中配置的 OpenAI 兼容接口。未配置时会引导去设置。密钥仍只保存在本机 `ai.json`；不会把完整原始报文无限制发送给模型。
+- **AI 设置新增预设**：小米 MiMo（默认 `https://api.xiaomimimo.com/v1`，模型 `mimo-v2.6-pro`；Token Plan 需改用控制台中的地址和 `tp-` / `ttp-` 密钥，不要与 `sk-` 混用）和 Grok（默认 `https://api.x.ai/v1`，模型 `grok-4.7`）。保留阿里云百炼、DeepSeek、OpenAI、本地 Ollama 与自定义。切换预设会自动填入地址和模型，API Key 需自行填写，软件不内置任何密钥。
 
 ## 1.2.3 主要变化
 
@@ -57,8 +64,8 @@
 
 在 [Releases](https://github.com/cnsunsz/wangluo-gongju/releases) 下载对应系统的包：
 
-- Windows：`WangLuoGongJu-v1.2.3.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
-- macOS Apple Silicon：`WangLuoGongJu-v1.2.3-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.3-macOS-x64.zip`。
+- Windows：`WangLuoGongJu-v1.2.4.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
+- macOS Apple Silicon：`WangLuoGongJu-v1.2.4-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.4-macOS-x64.zip`。
 
 点减号（macOS 为黄灯）会最小化到任务栏 / Dock，点关闭才会隐藏到后台并保持运行。需要彻底退出时，请用托盘或菜单栏图标「退出」，或打开窗口后到「设置」里点「退出程序」。标题栏「搜索工具」可过滤主界面图标。
 

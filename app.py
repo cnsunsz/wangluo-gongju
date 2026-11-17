@@ -1111,6 +1111,42 @@ def api_pcap_packet(no):
         return _json_exc(e)
 
 
+@app.get("/api/pcap/diagnose")
+def api_pcap_diagnose():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        query = request.args.get("q") or request.args.get("filter") or ""
+        return jsonify(ok=True, **pktcap.diagnose(query=query))
+    except Exception as e:
+        _log("pcap diagnose", exc=True)
+        return _json_exc(e)
+
+
+@app.post("/api/pcap/deep-analyze")
+def api_pcap_deep_analyze():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    d = request.get_json(silent=True) or {}
+    try:
+        brief = pktcap.deep_analyze_brief(no=d.get("no"), query=d.get("filter") or d.get("q") or "")
+    except Exception as e:
+        _log("pcap deep brief", exc=True)
+        return _json_exc(e)
+    if not brief.get("count"):
+        return jsonify(ok=False, error="请先打开 pcap 或开始抓包，再做深度分析"), 400
+    cfg = ai.public_config()
+    if not cfg.get("configured"):
+        return jsonify(ok=False, need_config=True, error="AI 尚未配置，请先打开「AI 设置」填写接口地址、模型和 API Key"), 400
+    note = "（已向模型发送脱敏后的摘要与统计，未发送完整原始报文）"
+    return sse(ai.analyze_stream(
+        "抓包分析",
+        note,
+        brief.get("text") or "",
+        d.get("focus") or "请依据摘要做深度解读：握手与会话是否异常、可能的故障点、还需要哪些本机检查。不要编造摘要中未出现的地址、域名或标志。",
+    ))
+
+
 @app.post("/api/pcap/open")
 def api_pcap_open():
     if not _is_local():

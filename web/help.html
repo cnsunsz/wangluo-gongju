@@ -55,11 +55,12 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
 <body>
 <header>
   <div class="wrap">
-    <h1>网络工具 <span class="tag">1.2.3 · Windows / macOS</span></h1>
+    <h1>网络工具 <span class="tag">1.2.4 · Windows / macOS</span></h1>
     <p class="sub">桌面网络工具箱，独立窗口运行（Windows / macOS）。关闭窗口会隐藏到托盘或后台并保持运行；网页在软件内打开。免安装，一般免管理员权限。数据只保存在本机。实时抓包在 Windows 上需要自行安装 Npcap，部分环境可能需要管理员权限；打开 pcap 文件不需要。</p>
     <p class="author">作者：Lorenzo</p>
     <nav>
       <a href="#start">快速开始</a>
+      <a href="#v124">1.2.4 变化</a>
       <a href="#v123">1.2.3 变化</a>
       <a href="#v122">1.2.2 变化</a>
       <a href="#v121">1.2.1 变化</a>
@@ -83,6 +84,14 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   </div>
   <p class="note">服务只监听 127.0.0.1，不对局域网开放。运行日志与配置在 Windows 的 <code>%LOCALAPPDATA%\网络工具\</code>，或 macOS 的 <code>~/Library/Application Support/网络工具/</code>，不会在程序旁边创建 data 文件夹。托盘或菜单栏可「打开窗口」或「退出」（退出会彻底结束进程）。需要打开的外部网页（例如三网拨测）会在软件内弹出子窗口，不会跳到系统浏览器。</p>
 
+
+  <h2 id="v124">1.2.4 有什么变化</h2>
+  <ul class="limit">
+    <li><b>抓包页不再挤成一条缝</b>：Npcap / 权限提示改为一行可展开、可关闭的短横幅，详细说明放到「详情」或本帮助页。工具栏拆成两行并加大留白：第一行是网卡、刷新、开始 / 停止 / 清空、打开 / 保存；第二行是捕获过滤、BPF、上限，以及跟踪 TCP 流、统计和深度分析。抓包页会隐藏底部那组通用的「开始 / 停止 / 清空 / 就绪」，避免和工具栏按钮重复、误点。内容区分为报文列表、报文分析、报文详情、报文字节；宽屏时分析与详情左右分开，窄屏再上下叠。各块都有足够的最小高度，可用分隔条拖动。点选报文后，详情树会回到该包顶层（Frame / 以太网 / IP），不再停在 TCP 最后几个字段。源 / 目的为 IPv6 或 Info 较长时，可悬停看全称。</li>
+    <li><b>报文分析与离线诊断</b>：「报文分析」和「报文详情」是两块独立区域。选中一条报文后，左侧用中文说明这条报文在做什么，例如 TCP 三次握手的 SYN / SYN-ACK / ACK、FIN 表示正在关闭、RST、HTTP GET 某 Host、DNS 查询或应答某域名、ICMP 目的不可达、TLS ClientHello 的 SNI（不解密 TLS）。解不到的协议会写已识别到哪一层。同时根据当前打开或抓到的报文（若使用了显示过滤，则针对可见集合）给出若干离线诊断结论，例如握手是否完成、连接是否在关闭、是否有 RST / 重传 / 校验问题、主要协议与会话、HTTP / DNS / TLS SNI 等可确定的事实，并附依据。分析由本机规则引擎生成，不依赖 AI，也不联网。</li>
+    <li><b>深度分析走已配置的大模型</b>：抓包页的「深度分析」会把脱敏后的摘要、统计、离线结论和当前选中报文的结构化信息发给「AI 设置」里已配置的 OpenAI 兼容接口。未配置时会引导去设置。密钥仍只存在本机 <code>config/ai.json</code>；不会把完整原始报文无限制发给模型，HTTP Cookie / Authorization 等会省略或截断。</li>
+    <li><b>AI 设置新增小米 MiMo 与 Grok</b>：预设「小米 MiMo」默认地址 <code>https://api.xiaomimimo.com/v1</code>、模型 <code>mimo-v2.6-pro</code>（也可改为 <code>mimo-v2.6-flash</code> 或 <code>mimo-v2.6-pro-ultraspeed</code>）。若使用 Token Plan，请改用控制台中的 Base URL（例如 <code>https://token-plan-cn.xiaomimimo.com/v1</code>）和 <code>tp-</code> / <code>ttp-</code> 密钥，不要与 <code>sk-</code> 混用。预设「Grok」默认地址 <code>https://api.x.ai/v1</code>、模型 <code>grok-4.7</code>（xAI 当前旗舰聊天模型）。保留阿里云百炼、DeepSeek、OpenAI、本地 Ollama 和自定义；切换预设会自动填入地址和模型。API Key 需自行填写，软件不内置任何密钥。</li>
+  </ul>
 
   <h2 id="v123">1.2.3 有什么变化</h2>
   <ul class="limit">
@@ -122,8 +131,8 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   <h2 id="ai">AI 分析（可选）</h2>
   <p class="note">任意工具跑完后，点「AI分析」，会把当前工具的参数、指标、表格和日志发给已配置的大模型，返回【结论】【依据】【建议】。点右上角「AI 设置」配置接口。</p>
   <ul>
-    <li>支持 OpenAI 兼容接口：阿里云百炼、DeepSeek、OpenAI、本地 Ollama 等，可选择预设后自动填入地址和模型。</li>
-    <li>API Key 仅保存在本机 <code>%LOCALAPPDATA%\网络工具\config\ai.json</code>；分析时只发送当前工具输出。</li>
+    <li>支持 OpenAI 兼容接口：阿里云百炼、DeepSeek、OpenAI、小米 MiMo、Grok、本地 Ollama 等，可选择预设后自动填入地址和模型。MiMo 按量付费默认 <code>https://api.xiaomimimo.com/v1</code> / <code>mimo-v2.6-pro</code>；Token Plan 请改用控制台地址和 <code>tp-</code> / <code>ttp-</code> 密钥。Grok 默认 <code>https://api.x.ai/v1</code> / <code>grok-4.7</code>。</li>
+    <li>API Key 仅保存在本机 <code>%LOCALAPPDATA%\网络工具\config\ai.json</code>（macOS 为应用支持目录下的 <code>config/ai.json</code>）；分析时只发送当前工具输出，或抓包页的脱敏摘要，不会把完整原始报文无限制发出。</li>
     <li>「Windows 诊断」可填「AI 关注问题」（如开机慢、磁盘 100%、蓝屏），AI 会围绕该问题深度分析；留空则做全局深度分析。</li>
     <li>「网络诊断」每个阶段现在有分隔标题（1/6 本机信息 … 6/6 完成），日志较长时更容易定位。</li>
   </ul>
@@ -150,7 +159,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
       <tr><td>Windows 诊断</td><td>系统常见故障体检（8 类）</td><td>全部或指定一类；可选 AI 关注问题</td><td>启动/自启与快速启动、蓝屏事件与转储、CPU/内存/磁盘、更新挂起与错误、网卡/音频/蓝牙/打印、资源管理器与商店、激活/BitLocker/磁盘空间、时间同步与 WHEA</td></tr>
       <tr><td>站点对比</td><td>多站点耗时 / 状态对比</td><td>最多 20 个 URL；完整分段或只查状态</td><td>状态码、DNS / TCP / TLS / 首字节 / 总计</td></tr>
       <tr><td>三网拨测</td><td>阿里云全国节点 HTTP 拨测（电信/联通/移动）</td><td>域名或 URL</td><td>在软件内新开窗口打开阿里云拨测（不跳系统浏览器）并自动复制域名；查看三网各省市状态码、分段耗时、解析 IP，支持阿里云页面导出报表 <span class="need">需联网</span></td></tr>
-      <tr><td>抓包分析</td><td>类 Wireshark 的报文列表、逐层解析与字节视图</td><td>网卡 + 可选 BPF；或打开 pcap / pcapng</td><td>三栏同屏：列表、字段树（点选高亮字节）、十六进制/ASCII。支持过滤、统计、跟踪 TCP 流、保存为 pcap。打开文件不需 Npcap；Windows 实时抓包需自行安装 Npcap，必要时以管理员运行。流量不上云。标题栏搜索「抓包」「pcap」「Wireshark」「报文分析」可找到本工具</td></tr>
+      <tr><td>抓包分析</td><td>报文列表、离线诊断与逐条报文分析、逐层详情、字节视图</td><td>网卡 + 可选 BPF；或打开 pcap / pcapng</td><td>四块同屏：列表、报文分析（本包说明 + 整次抓包结论）、字段树（点选高亮字节）、十六进制/ASCII。支持过滤、统计、跟踪 TCP 流、保存为 pcap，以及可选的 AI 深度分析。打开文件不需 Npcap；Windows 实时抓包需自行安装 Npcap，必要时以管理员运行。流量默认只在本机分析。标题栏搜索「抓包」「pcap」「Wireshark」「报文分析」可找到本工具</td></tr>
       <tr><td>网卡流量</td><td>各网卡实时上下行</td><td>时长（0 为持续）</td><td>每秒刷新各网卡下行 / 上行速率与累计流量</td></tr>
       <tr><td>NAT 类型</td><td>STUN 检测 NAT 类型</td><td>无需输入</td><td>公网 / 锥型 / 对称型等；部分公用 STUN 不支持 CHANGE-REQUEST 时会如实说明，无法进一步细分锥型 <span class="need">需联网（UDP）</span></td></tr>
       <tr><td>批量任务</td><td>批量 Ping 或批量端口检查</td><td>最多 30 个主机</td><td>逐主机结果表</td></tr>
@@ -255,7 +264,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <ol>
       <li>打开「抓包分析」。若只需看已有文件，点「打开 pcap」，不需要 Npcap 或管理员权限。</li>
       <li>若要实时抓包：Windows 先安装 Npcap（https://npcap.com/），必要时以管理员运行；macOS 若提示 BPF 权限不足，用管理员权限运行。选择网卡和过滤条件后点「开始抓包」，不会自动开始。</li>
-      <li>在列表中点一条报文，中间查看逐层字段，下方对照原始字节。可用「跟踪 TCP 流」重组会话，「统计」查看协议与对端汇总。</li>
+      <li>在列表中点一条报文：左侧「报文分析」查看这条报文的中文说明，以及针对整次抓包的离线诊断结论；右侧「报文详情」查看逐层字段；下方对照原始字节。可用「跟踪 TCP 流」重组会话，「统计」查看协议与对端汇总。若已配置 AI，可用「深度分析」做进一步解读。</li>
     </ol>
   </div>
 
@@ -295,7 +304,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   <pre><code>powershell -ExecutionPolicy Bypass -File build.ps1</code></pre>
   <p class="note">iperf3 会依次在 PATH、程序目录、<code>_MEIPASS</code> 中查找 <code>bin/iperf3.exe</code>。旧版若在 exe 旁残留 data 目录，首次启动会把 ai.json 和日志迁移到 LocalAppData。</p>
 
-  <footer>网络工具 1.2.3（Windows / macOS）· 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
+  <footer>网络工具 1.2.4（Windows / macOS）· 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
 </main>
 </body>
 </html>
