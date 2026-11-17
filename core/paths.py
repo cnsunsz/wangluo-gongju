@@ -5,7 +5,7 @@ import os
 import sys
 
 APP_NAME = "网络工具"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 APP_AUTHOR = "Lorenzo"
 APP_DESCRIPTION = "网络工具"
 LEGACY_APP_NAME = "网络万用表"
@@ -108,17 +108,42 @@ def reports_dir() -> str:
     return path
 
 
-def icon_path() -> str | None:
-    names = ("app.icns", "app-64.png", "app.ico", "app-source.png")
-    bases = (
+def _icon_search_bases() -> tuple[str, ...]:
+    return (
         os.path.join(resource_dir(), "icons"),
         os.path.join(exe_dir(), "icons"),
         resource_dir(),
-        os.path.join(exe_dir()),
+        exe_dir(),
     )
-    for base in bases:
+
+
+def _first_icon(names: tuple[str, ...]) -> str | None:
+    for base in _icon_search_bases():
         for name in names:
-            p = os.path.join(base, name)
-            if os.path.isfile(p):
-                return p
+            path = os.path.join(base, name)
+            if os.path.isfile(path):
+                return path
     return None
+
+
+def window_icon_path() -> str | None:
+    """给 pywebview / 窗口标题栏用的图标。Windows 只返回 .ico，绝不以 png/icns 充当。"""
+    if is_windows():
+        return _first_icon(("app.ico",))
+    if is_macos():
+        return _first_icon(("app.icns", "app-64.png", "app-source.png"))
+    return _first_icon(("app-64.png", "app.ico", "app.icns", "app-source.png"))
+
+
+def tray_image_path() -> str | None:
+    """给 Pillow / pystray 用的位图。优先 PNG，避免把 icns 交给解码器，Windows 也可回退到 ico。"""
+    if is_macos():
+        return _first_icon(("app-64.png", "app-source.png"))
+    if is_windows():
+        return _first_icon(("app-64.png", "app.ico"))
+    return _first_icon(("app-64.png", "app-source.png", "app.ico"))
+
+
+def icon_path() -> str | None:
+    """窗口图标。兼容旧调用，等同 window_icon_path()。"""
+    return window_icon_path()

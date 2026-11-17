@@ -105,8 +105,8 @@ jobs:
           if-no-files-found: warn
 
   release:
-    needs: [build-windows, build-macos, build-macos-intel]
-    if: ${{ always() && startsWith(github.ref, 'refs/tags/') && needs.build-windows.result == 'success' && needs.build-macos.result == 'success' }}
+    needs: [build-windows, build-macos]
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -145,15 +145,38 @@ jobs:
             - Windows：`%LOCALAPPDATA%\网络工具\`
             - macOS：`~/Library/Application Support/网络工具/`
 
-            ## 1.2.1 更新
+            ## 1.2.2 更新
 
-            - **减号最小化到任务栏 / Dock**：点窗口「减号」（macOS 为黄灯）只做普通最小化，窗口留在任务栏或 Dock，再点图标即可恢复。不会隐藏到托盘，也不会从任务栏 / Dock 消失。已去掉「最小化运行」开关。
-            - **关闭才进后台**：点「关闭」仍然隐藏到托盘（Windows）或菜单栏 / 后台（macOS）并保持运行；只有托盘或菜单栏「退出」，或「设置 → 退出程序」，才会彻底结束进程。开机自启会正常显示主窗口。
-            - **标题栏搜索工具**：在「设置」左侧增加「搜索工具」输入框，可按中文名称或常见英文（如 ping、ssh）即时过滤主界面图标。清空后恢复全部；在搜索框按 Enter 若只剩一项则打开该工具，Esc 清空。
-            - **新增 macOS 版**：Apple Silicon 优先，并尝试提供 Intel 包。SSH、服务器信息提取、搜索栏、关闭进后台等通用能力可用。Windows 诊断、WLAN 分析仅在 Windows 显示。网卡叠加在 Mac 上使用源地址绑定 + `IP_BOUND_IF`，不接管系统代理，请在应用里手动填写本地 HTTP / SOCKS5 代理。开机自启写入当前用户 LaunchAgents。
+            - **修复 Windows 无法启动**：v1.2.1 把 PNG 当成窗口/托盘图标交给系统，进程会在启动时静默退出。本版在 Windows 上只向窗口传入 `.ico`；托盘用 Pillow 转为位图。图标失败会降级为无图标继续打开，异常写入 `%LOCALAPPDATA%\网络工具\logs\app.log`。
+            - **崩溃后可再次打开**：上次异常退出留下的单实例锁，若进程已死或服务无响应，会自动接管。
+            - **macOS 启动防护**：打包并优先使用 `app.icns`，不把 Windows `.ico` 直接交给 Cocoa。菜单栏托盘在主窗口就绪后再创建，失败不影响 Dock 与主界面。
+
+            ## 1.2.1 已有能力
+
+            - 减号 / 黄灯最小化到任务栏或 Dock；点关闭才进托盘或后台。标题栏可搜索工具。
+            - 提供 macOS Apple Silicon 版（另尝试 Intel 包）。SSH、服务器信息提取等通用能力可用；Windows 诊断与 WLAN 仅 Windows 显示。网卡叠加在 Mac 上不接管系统代理。
 
             ## 1.2.0 已有能力
 
             - 网页在软件内打开（例如三网拨测），不跳系统浏览器。
             - 已删除「分享软件」。
             - 网卡叠加、服务器信息提取、SSH（可保存主机）、路由表、ARP 表、网卡实时流量、NAT 类型检测。
+
+  publish-macos-intel:
+    needs: [build-macos-intel, release]
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/') && needs.build-macos-intel.result == 'success' && needs.release.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Intel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-x64
+          path: artifacts
+
+      - name: Attach Intel zip to existing Release
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: false
+          files: artifacts/WangLuoGongJu-${{ github.ref_name }}-macOS-x64.zip

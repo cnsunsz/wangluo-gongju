@@ -24,7 +24,10 @@ from core import (
     mux, net_extra, nettools, ping, scan, ssh_tool, trace, win_diag,
 )
 from core import procs, settings as app_settings
-from core.paths import APP_NAME, APP_VERSION, exe_dir, icon_path, is_frozen, resource_dir, runtime_dir
+from core.paths import (
+    APP_NAME, APP_VERSION, exe_dir, is_frozen, is_macos,
+    resource_dir, runtime_dir, tray_image_path, window_icon_path,
+)
 
 FROZEN = is_frozen()
 ROOT = exe_dir()
@@ -115,19 +118,75 @@ def _migrate_legacy():
         pass
 
 
-def _setup_background_logging():
-    if not (os.environ.get("NETMETER_BG") or FROZEN):
-        return
-    os.makedirs(os.path.join(RUN_DIR, "logs"), exist_ok=True)
-    path = os.path.join(RUN_DIR, "logs", "app.log")
+def _log_path() -> str:
+    return os.path.join(RUN_DIR, "logs", "app.log")
+
+
+def _rotate_log_if_needed(path: str) -> None:
     try:
         if os.path.isfile(path) and os.path.getsize(path) > 5 * 1024 * 1024:
             os.replace(path, path + ".1")
     except OSError:
         pass
-    stream = open(path, "a", encoding="utf-8", buffering=1)
-    sys.stdout = stream
-    sys.stderr = stream
+
+
+def _log(msg: str, exc: bool = False) -> None:
+    import traceback
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    text = f"{ts} {msg}"
+    if exc:
+        text += "\n" + traceback.format_exc()
+    try:
+        os.makedirs(os.path.dirname(_log_path()), exist_ok=True)
+        with open(_log_path(), "a", encoding="utf-8") as f:
+            f.write(text + "\n")
+            f.flush()
+    except OSError:
+        pass
+    try:
+        print(text, flush=True)
+    except Exception:
+        pass
+
+
+def _install_exception_hooks() -> None:
+    def hook(exc_type, exc, tb):
+        import traceback
+        try:
+            os.makedirs(os.path.dirname(_log_path()), exist_ok=True)
+            with open(_log_path(), "a", encoding="utf-8") as f:
+                f.write("未捕获异常:\n")
+                traceback.print_exception(exc_type, exc, tb, file=f)
+                f.flush()
+        except OSError:
+            pass
+        try:
+            traceback.print_exception(exc_type, exc, tb)
+        except Exception:
+            pass
+
+    sys.excepthook = hook
+
+    if hasattr(threading, "excepthook"):
+        def thread_hook(args):
+            hook(args.exc_type, args.exc_value, args.exc_traceback)
+        threading.excepthook = thread_hook
+
+
+def _setup_background_logging():
+    os.makedirs(os.path.join(RUN_DIR, "logs"), exist_ok=True)
+    path = _log_path()
+    _rotate_log_if_needed(path)
+    _install_exception_hooks()
+    # 冻结的 exe 没有控制台，把 stdout/stderr 接到同一日志，避免静默失败
+    if os.environ.get("NETMETER_BG") or FROZEN:
+        try:
+            stream = open(path, "a", encoding="utf-8", buffering=1)
+            sys.stdout = stream
+            sys.stderr = stream
+        except OSError:
+            pass
 
 
 def _write_runtime(url):
@@ -194,54 +253,154 @@ def _pid_alive(pid: int) -> bool:
 
 
 def _lock_pid():
+    for name in ("app.lock", "pid.txt"):
+        try:
+            with open(os.path.join(RUN_DIR, name), encoding="utf-8") as f:
+                text = f.read().strip()
+            if not text:
+                continue
+            return int(text.split()[0])
+        except (OSError, ValueError, IndexError):
+            continue
+    return 0
+
+
+def _process_image(pid: int) -> str:
+    if pid <= 0:
+        return ""
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return ""
+            try:
+                buf = ctypes.create_unicode_buffer(32768)
+                size = wintypes.DWORD(32768)
+                if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                    return buf.value
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            return ""
+        return ""
     try:
-        with open(os.path.join(RUN_DIR, "pid.txt"), encoding="utf-8") as f:
-            return int(f.read().strip() or 0)
-    except (OSError, ValueError):
-        return 0
+        return os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        return ""
 
 
-def _acquire_single_instance():
+def _pid_is_our_app(pid: int) -> bool:
+    if not _pid_alive(pid):
+        return False
+    image = (_process_image(pid) or "").replace("\\", "/")
+    if not image:
+        return False
+    base = os.path.basename(image).lower()
+    ours = (os.path.basename(sys.executable) or "").lower()
+    if ours and base == ours:
+        return True
+    if is_frozen() and os.path.normcase(_process_image(pid)) == os.path.normcase(sys.executable):
+        return True
+    if "wangluogongju" in base or base == "网络工具.exe":
+        return True
+    if is_macos() and ("网络工具" in image or "wangluogongju" in base):
+        return True
+    return False
+
+
+def _instance_http_alive() -> bool:
+    try:
+        with open(os.path.join(RUN_DIR, "url.txt"), encoding="utf-8") as f:
+            url = (f.read() or "").strip()
+    except OSError:
+        return False
+    if not url.startswith("http"):
+        return False
+    try:
+        from urllib.parse import urlparse
+        p = urlparse(url)
+        host = p.hostname or "127.0.0.1"
+        port = int(p.port or 80)
+        with socket.create_connection((host, port), timeout=0.4):
+            return True
+    except Exception:
+        return False
+
+
+def _other_instance_running() -> bool:
+    if _instance_http_alive():
+        return True
+    return _pid_is_our_app(_lock_pid())
+
+
+def _write_pid_into_lock(handle) -> None:
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(os.getpid()).encode("ascii"))
+        handle.flush()
+    except Exception:
+        pass
+
+
+def _acquire_single_instance(force: bool = False):
     global _LOCK_HANDLE
     os.makedirs(RUN_DIR, exist_ok=True)
     path = os.path.join(RUN_DIR, "app.lock")
+
+    def _busy() -> bool:
+        return (not force) and _other_instance_running()
+
     try:
         import msvcrt
     except ImportError:
-        # 非 Windows：用独占打开模拟
-        try:
-            flags = os.O_CREAT | os.O_RDWR
-            if hasattr(os, "O_EXCL"):
-                pass
-            handle = open(path, "a+b")
+        for _ in range(3):
+            handle = None
             try:
+                handle = open(path, "a+b")
                 import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _write_pid_into_lock(handle)
+                _LOCK_HANDLE = handle
+                return True
             except Exception:
-                handle.close()
-                return False
-            _LOCK_HANDLE = handle
-            return True
-        except OSError:
-            return False
-    for _ in range(2):
+                if handle is not None:
+                    try:
+                        handle.close()
+                    except Exception:
+                        pass
+                if _busy():
+                    return False
+                try:
+                    os.remove(path)
+                except OSError:
+                    time.sleep(0.05)
+        return False
+
+    for _ in range(3):
+        handle = None
         try:
             handle = open(path, "a+b")
             handle.seek(0)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            _write_pid_into_lock(handle)
             _LOCK_HANDLE = handle
             return True
         except OSError:
-            try:
-                handle.close()
-            except Exception:
-                pass
-            if _pid_alive(_lock_pid()):
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+            if _busy():
                 return False
             try:
                 os.remove(path)
             except OSError:
-                return False
+                time.sleep(0.05)
     return False
 
 
@@ -1114,7 +1273,10 @@ def hide_window():
 def _on_closing():
     if _shutting_down.is_set():
         return True
-    _ensure_tray()
+    try:
+        _ensure_tray(force=True)
+    except Exception:
+        _log("关闭时创建托盘失败", exc=True)
     hide_window()
     return False
 
@@ -1142,36 +1304,66 @@ def _sync_tray():
     _ensure_tray()
 
 
-def _ensure_tray():
+def _load_tray_image():
+    """用 Pillow 解码为 RGBA，绝不把路径直接丢给 System.Drawing.Icon / Cocoa NSImage。"""
+    from PIL import Image
+    candidates = []
+    chosen = tray_image_path()
+    if chosen:
+        candidates.append(chosen)
+    for name in ("app-64.png", "app-source.png", "app.ico"):
+        path = os.path.join(RES, "icons", name)
+        if path not in candidates:
+            candidates.append(path)
+    for path in candidates:
+        if not path or not os.path.isfile(path):
+            continue
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".icns":
+            continue
+        try:
+            im = Image.open(path)
+            im = im.convert("RGBA")
+            im.load()
+            return im.copy()
+        except Exception as e:
+            _log(f"托盘图标无法解码 {path}: {e}", exc=True)
+    return Image.new("RGBA", (64, 64), (58, 74, 158, 255))
+
+
+def _ensure_tray(force: bool = False):
     global _tray
     if _tray is not None:
         return
+    # macOS：等 Cocoa 跑起来再创建菜单栏图标，失败也不影响主窗口 / Dock。
+    # 关窗口进后台时若尚未就绪，仍尝试创建，否则可能既无窗口也无托盘。
+    if is_macos() and not _gui_ready.is_set() and not force:
+        return
     try:
         import pystray
-        from PIL import Image
-    except ImportError:
+        from PIL import Image  # noqa: F401
+    except Exception as e:
+        _log(f"未加载托盘库，将仅使用任务栏 / Dock: {e}", exc=True)
         return
-    ico = icon_path()
-    image = None
-    if ico:
-        try:
-            image = Image.open(ico)
-        except Exception:
-            image = None
-    if image is None:
-        png = os.path.join(RES, "icons", "app-64.png")
-        if os.path.isfile(png):
-            image = Image.open(png)
-        else:
-            image = Image.new("RGBA", (64, 64), (58, 74, 158, 255))
+    try:
+        image = _load_tray_image()
+        menu = pystray.Menu(
+            pystray.MenuItem("打开窗口", lambda: show_window(), default=True),
+            pystray.MenuItem("退出", lambda: _full_exit(0)),
+        )
+        icon = pystray.Icon("netmeter", image, APP_NAME, menu)
+        _tray = icon
 
-    menu = pystray.Menu(
-        pystray.MenuItem("打开窗口", lambda: show_window(), default=True),
-        pystray.MenuItem("退出", lambda: _full_exit(0)),
-    )
-    icon = pystray.Icon("netmeter", image, APP_NAME, menu)
-    _tray = icon
-    threading.Thread(target=icon.run, daemon=True).start()
+        def _run_tray():
+            try:
+                icon.run()
+            except Exception:
+                _log("托盘线程退出", exc=True)
+
+        threading.Thread(target=_run_tray, daemon=True, name="tray").start()
+    except Exception:
+        _log("创建托盘失败，继续启动主窗口", exc=True)
+        _tray = None
 
 
 def _run_flask(port):
@@ -1183,10 +1375,16 @@ def main():
     _migrate_legacy()
     os.makedirs(RUN_DIR, exist_ok=True)
     _setup_background_logging()
+    _log(f"启动 {APP_NAME} v{APP_VERSION} frozen={FROZEN} platform={sys.platform}")
 
     if not _acquire_single_instance():
-        _open_existing_instance()
-        sys.exit(0)
+        if _open_existing_instance():
+            _log("已有实例在运行，已尝试唤醒后退出")
+            sys.exit(0)
+        _log("未能唤醒已有实例（可能是上次异常退出留下的锁），尝试接管")
+        if not _acquire_single_instance(force=True):
+            _log("仍无法取得单实例锁，退出")
+            sys.exit(0)
 
     want = 8899
     raw = os.environ.get("NETMETER_PORT", "")
@@ -1257,7 +1455,11 @@ def main():
         pass
     browse.patch_edge_new_window()
 
-    ico = icon_path()
+    ico = window_icon_path()
+    if ico:
+        _log(f"窗口图标: {ico}")
+    else:
+        _log("未找到平台匹配的窗口图标，将不带 icon 启动")
     js_api = browse.JsBridge()
     kwargs = dict(title=APP_NAME, url=url, width=1280, height=860, min_size=(960, 640),
                   confirm_close=False, text_select=True, js_api=js_api)
@@ -1288,12 +1490,23 @@ def main():
     # 不监听 minimized：减号必须走系统普通最小化，窗口留在任务栏。
     # 只有 closing 才会 hide 到托盘。
 
-    _sync_tray()
+    if not is_macos():
+        try:
+            _sync_tray()
+        except Exception:
+            _log("启动前创建托盘失败", exc=True)
 
     def _on_gui_ready():
-        browse.patch_edge_new_window()
-        browse.guard_main_navigation(_window)
-        _sync_tray()
+        _gui_ready.set()
+        try:
+            browse.patch_edge_new_window()
+            browse.guard_main_navigation(_window)
+        except Exception:
+            _log("GUI 就绪钩子部分失败", exc=True)
+        try:
+            _sync_tray()
+        except Exception:
+            _log("GUI 就绪后创建托盘失败", exc=True)
 
     start_kwargs = {"debug": False}
     if sys.platform == "darwin":
@@ -1304,25 +1517,37 @@ def main():
         default_gui = "gtk"
     gui = os.environ.get("NETMETER_GUI", default_gui)
     started = False
-    for attempt in (
-        lambda: webview.start(_on_gui_ready, gui=gui, icon=ico, **start_kwargs),
-        lambda: webview.start(_on_gui_ready, gui=gui, **start_kwargs),
-        lambda: webview.start(_on_gui_ready, **start_kwargs),
-        lambda: webview.start(gui=gui, **start_kwargs),
-        lambda: webview.start(**start_kwargs),
-    ):
+    # Windows 只把 .ico 传给 webview；失败则自动去掉 icon 再试，避免 System.Drawing.Icon 打死进程
+    attempts = []
+    if ico:
+        attempts.append(("gui+icon", dict(func=_on_gui_ready, gui=gui, icon=ico, **start_kwargs)))
+    attempts.extend([
+        ("gui", dict(func=_on_gui_ready, gui=gui, **start_kwargs)),
+        ("func", dict(func=_on_gui_ready, **start_kwargs)),
+        ("gui-only", dict(gui=gui, **start_kwargs)),
+        ("plain", dict(**start_kwargs)),
+    ])
+    for name, kw in attempts:
         try:
-            attempt()
+            _log(f"webview.start 尝试: {name}")
+            webview.start(**kw)
             started = True
             break
-        except TypeError:
+        except TypeError as e:
+            _log(f"webview.start {name} 参数不兼容: {e}")
             continue
         except Exception:
+            _log(f"webview.start {name} 失败", exc=True)
             if started:
                 raise
             continue
     if not started:
-        webview.start()
+        try:
+            _log("webview.start 回退到无参数")
+            webview.start()
+        except Exception:
+            _log("webview.start 无参数仍失败", exc=True)
+            raise
 
     # start() 返回通常表示所有窗口已关闭。关闭主窗口只会隐藏，
     # 但仍可能因异常导致循环结束，此时保持 Flask + 托盘。
@@ -1337,4 +1562,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        try:
+            _log("main 异常退出", exc=True)
+        except Exception:
+            pass
+        raise
