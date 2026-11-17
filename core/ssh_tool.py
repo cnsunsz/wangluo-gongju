@@ -1,7 +1,7 @@
 """SSH 会话与常用主机保存。
 
-主机列表存在 %LOCALAPPDATA%\\网络工具\\config\\ssh_hosts.json。
-密码默认不保存；若用户勾选「记住密码」，在 Windows 上用 DPAPI（当前用户）加密后另存。
+主机列表存在运行时配置目录 config/ssh_hosts.json。
+密码默认不保存；若用户勾选「记住密码」：Windows 用 DPAPI（当前用户）加密，其它平台用本机 Fernet 密钥加密后另存。
 私钥只保存用户选择的本地路径，不把密钥内容写入文件或仓库。
 """
 from __future__ import annotations

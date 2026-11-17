@@ -1,4 +1,4 @@
-/* 应用设置：托盘最小化、开机自启；关闭窗口始终留在后台 */
+/* 应用设置：开机自启；关闭窗口始终留在后台 */
 (function () {
   const $ = id => document.getElementById(id);
 
@@ -10,10 +10,21 @@
     $('settingsMsg').className = 'modal-msg';
     fetch('/api/settings').then(r => r.json()).then(d => {
       if (!d.ok) return;
-      $('setMinimize').checked = !!d.minimize_to_tray;
       $('setAutostart').checked = !!d.autostart;
       if (d.run_dir) {
         $('settingsPath').textContent = '配置与日志保存在：' + d.run_dir + '（不会在程序目录创建 data 文件夹）';
+      }
+      const hint = $('autostartHint');
+      if (hint) {
+        if (d.platform === 'macos') {
+          hint.textContent = '登录 macOS 后自动启动并显示主窗口（写入当前用户 LaunchAgents）。点关闭仍会隐藏到菜单栏 / Dock。';
+        } else if (d.platform === 'windows') {
+          hint.textContent = '登录 Windows 后自动启动并显示主窗口。点关闭仍会隐藏到托盘。';
+        }
+      }
+      if (d.features && d.features.autostart === false) {
+        const row = $('setAutostart') && $('setAutostart').closest('.switch-row');
+        if (row) row.hidden = true;
       }
     }).catch(() => {});
   }
@@ -32,14 +43,13 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          minimize_to_tray: $('setMinimize').checked,
           autostart: $('setAutostart').checked
         })
       });
       const d = await resp.json();
       if (!d.ok) throw new Error(d.error || '保存失败');
       msg.className = 'modal-msg ok';
-      msg.textContent = '已保存。关闭窗口会隐藏到托盘并保持运行；只有托盘「退出」或「退出程序」才会结束进程。';
+      msg.textContent = (d.platform === 'macos') ? '已保存。点黄灯会最小化到 Dock；点关闭才隐藏到后台。只有菜单栏「退出」或「退出程序」才会结束进程。' : '已保存。点减号会最小化到任务栏；点关闭才进入托盘。只有托盘「退出」或「退出程序」才会结束进程。';
       if (typeof toast === 'function') toast('设置已保存');
     } catch (e) {
       msg.className = 'modal-msg err';

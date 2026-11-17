@@ -107,7 +107,8 @@ window.PANELS = window.PANELS || {};
       clearOutputs();
       appendLog('聚合已启动。只有走系统代理或手动填写本地代理的应用才会分流。', 'ok');
       appendLog('HTTP：' + d.http + '　SOCKS5：' + d.socks, 'info');
-      if (d.system_proxy) appendLog('已接管当前用户的 Windows 系统代理；停止或退出时会自动恢复。', 'info');
+      if (d.system_proxy) appendLog('已接管当前用户的系统代理；停止或退出时会自动恢复。', 'info');
+      else if (window.APP_INFO && window.APP_INFO.platform !== 'windows') appendLog('macOS / Linux 上不会接管系统代理，请在需要分流的应用里手动填写下方本地代理。', 'info');
       renderStatus(d);
       startPoll();
       toast('网卡叠加已启动');
@@ -123,7 +124,7 @@ window.PANELS = window.PANELS || {};
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || '停止失败');
       renderStatus({ running: false, strategy: 'rr', adapters: [] });
-      appendLog('已停止聚合，并恢复原先的系统代理（若曾接管）。', 'warn');
+      appendLog((window.APP_INFO && window.APP_INFO.platform === 'windows') ? '已停止聚合，并恢复原先的系统代理（若曾接管）。' : '已停止聚合。', 'warn');
       setStatus('已停止', 'warn');
       setBusy(false);
       state.running = false;
@@ -158,6 +159,20 @@ window.PANELS = window.PANELS || {};
       <div class="mux-warn">停止聚合、退出程序或异常退出时会尝试恢复原先的系统代理。策略变更只影响之后的新连接，已建立的 TCP 不会迁移。</div>
     `;
     $id('muxRefresh').onclick = refreshAdapters;
+    if (window.APP_INFO && window.APP_INFO.platform !== 'windows') {
+      const note = panel.querySelector('.mux-note');
+      if (note) note.innerHTML = '这是<strong>连接级</strong>负载分配：每条新的 TCP 会绑定到一张已选网卡的源地址（macOS 使用 IP_BOUND_IF）。'
+        + '<b>不会</b>拆开单条 TCP，也不是网卡绑线（bonding），<b>不要指望单连接测速等于多条网络之和</b>。'
+        + '本平台不会接管系统代理，请在浏览器或下载器中手动填写下方本地 HTTP / SOCKS5 代理。本工具本身不创建虚拟网卡 / TUN。';
+      const box = $id('muxSysProxy');
+      if (box) {
+        box.checked = false;
+        const lab = box.closest('label');
+        if (lab) lab.style.display = 'none';
+      }
+      const warn = panel.querySelector('.mux-warn');
+      if (warn) warn.textContent = '策略变更只影响之后的新连接，已建立的 TCP 不会迁移。';
+    }
     refreshAdapters();
     tick().then(() => {
       const d = state; // if already running, keep polling

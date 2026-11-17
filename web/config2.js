@@ -62,7 +62,8 @@ TOOLS.push(
   },
   {
     id: 'wlan', name: 'WLAN 分析', color: 'red', icon: 'wifi', group: 'detect',
-    sub: '周边 SSID / 信号 / 信道', mode: 'json', endpoint: '/api/wlan', fields: []
+    windowsOnly: true,
+    sub: '周边 SSID / 信号 / 信道（仅 Windows）', mode: 'json', endpoint: '/api/wlan', fields: []
   },
   {
     id: 'telnet', name: 'telnet', color: 'red', icon: 'telnet', group: 'detect',
@@ -76,7 +77,8 @@ TOOLS.push(
   },
   {
     id: 'windiag', name: 'Windows 诊断', color: 'red', icon: 'windoctor', group: 'detect',
-    sub: '系统体检：启动 / 蓝屏 / 性能 / 更新 / 外设 / 激活', mode: 'sse', endpoint: '/api/windiag/stream',
+    windowsOnly: true,
+    sub: '系统体检：启动 / 蓝屏 / 性能 / 更新 / 外设 / 激活（仅 Windows）', mode: 'sse', endpoint: '/api/windiag/stream',
     fields: [
       FIELD('scope', '诊断范围', 'all', {
         type: 'select', options: [
@@ -168,7 +170,7 @@ TOOLS.push(
   },
   {
     id: 'iperf3', name: 'iperf3', color: 'pink', icon: 'gauge', group: 'adv',
-    sub: '内置 iperf3 3.22（bin/iperf3.exe）', mode: 'sse', endpoint: '/api/iperf3/stream',
+    sub: '内置 iperf3（打包时放入 bin/）', mode: 'sse', endpoint: '/api/iperf3/stream',
     fields: [
       FIELD('host', '服务端地址', '', { wide: true, ph: '如 10.1.2.3 或公网 iperf3 服务器' }),
       FIELD('port', '端口', '5201', { type: 'number', min: 1, max: 65535 }),

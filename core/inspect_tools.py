@@ -5,6 +5,7 @@ import csv
 import io
 import os
 import platform
+import sys
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -18,10 +19,22 @@ def _ping_df(host, size, timeout_ms, family):
     cmd = ["ping"]
     if int(family) == 6:
         cmd.append("-6")
-    cmd += ["-n", "1", "-w", str(timeout_ms)]
-    if int(family) == 4:
-        cmd.append("-f")  # Don't Fragment
-    cmd += ["-l", str(size), host]
+    if os.name == "nt":
+        cmd += ["-n", "1", "-w", str(timeout_ms)]
+        if int(family) == 4:
+            cmd.append("-f")  # Don't Fragment
+        cmd += ["-l", str(size), host]
+    else:
+        cmd += ["-c", "1", "-s", str(size)]
+        if sys.platform == "darwin":
+            cmd += ["-W", str(max(1, int(timeout_ms)))]
+            if int(family) == 4:
+                cmd.append("-D")  # Don't Fragment
+        else:
+            cmd += ["-W", str(max(1, int((int(timeout_ms) + 999) // 1000)))]
+            if int(family) == 4:
+                cmd += ["-M", "do"]
+        cmd.append(host)
     out, _ = run_cmd(cmd, timeout=max(1, timeout_ms // 1000 + 5))
     low = out.lower()
     if any(k in low for k in ("需要拆分", "fragmented", "fragmentation", "frag")):
@@ -181,9 +194,9 @@ def build_report(note=""):
 
     started = time.perf_counter()
     parts = [
-        "网络工具 Windows - 诊断报告\n",
+        "网络工具 - 诊断报告\n",
         "生成时间: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n",
-        "应用版本: 1.1\n",
+        "应用版本: " + __import__("core.paths", fromlist=["APP_VERSION"]).APP_VERSION + "\n",
         "系统: " + platform.platform() + "\n",
         "主机名: " + platform.node() + "\n",
         "Python: " + platform.python_version() + "\n",
@@ -191,17 +204,45 @@ def build_report(note=""):
     if (note or "").strip():
         parts.append("备注: " + note.strip() + "\n")
 
-    reg_path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-    cmds = {
-        "ipconfig": (["ipconfig", "/all"], 20),
-        "route": (["route", "print"], 20),
-        "arp": (["arp", "-a"], 10),
-        "netstat": (["netstat", "-ano"], 20),
-        "winhttp": (["netsh", "winhttp", "show", "proxy"], 10),
-        "proxy_enable": (["reg", "query", reg_path, "/v", "ProxyEnable"], 8),
-        "proxy_server": (["reg", "query", reg_path, "/v", "ProxyServer"], 8),
-        "firewall": (["netsh", "advfirewall", "show", "allprofiles", "state"], 10),
-    }
+    if os.name == "nt":
+        reg_path = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        cmds = {
+            "ipconfig": (["ipconfig", "/all"], 20),
+            "route": (["route", "print"], 20),
+            "arp": (["arp", "-a"], 10),
+            "netstat": (["netstat", "-ano"], 20),
+            "winhttp": (["netsh", "winhttp", "show", "proxy"], 10),
+            "proxy_enable": (["reg", "query", reg_path, "/v", "ProxyEnable"], 8),
+            "proxy_server": (["reg", "query", reg_path, "/v", "ProxyServer"], 8),
+            "firewall": (["netsh", "advfirewall", "show", "allprofiles", "state"], 10),
+        }
+        ipcfg_title = "ipconfig /all"
+        netstat_title = "netstat -ano"
+    else:
+        if sys.platform == "darwin":
+            cmds = {
+                "ipconfig": (["/sbin/ifconfig"], 20),
+                "route": (["/usr/sbin/netstat", "-rn"], 20),
+                "arp": (["arp", "-an"], 10),
+                "netstat": (["/usr/sbin/netstat", "-anv"], 20),
+                "winhttp": (["/usr/sbin/networksetup", "-getwebproxy", "Wi-Fi"], 8),
+                "proxy_enable": (["/usr/sbin/scutil", "--proxy"], 8),
+                "proxy_server": (["true"], 1),
+                "firewall": (["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate"], 8),
+            }
+        else:
+            cmds = {
+                "ipconfig": (["ip", "addr"], 20),
+                "route": (["ip", "route"], 20),
+                "arp": (["ip", "neigh"], 10),
+                "netstat": (["ss", "-tulpn"], 20),
+                "winhttp": (["true"], 1),
+                "proxy_enable": (["true"], 1),
+                "proxy_server": (["true"], 1),
+                "firewall": (["true"], 1),
+            }
+        ipcfg_title = "ifconfig / ip addr"
+        netstat_title = "netstat / ss"
 
     def overview():
         try:
@@ -221,7 +262,7 @@ def build_report(note=""):
         ])) or "-"
         if geo:
             parts_.append("公网地址归属: " + addr + (" / " + (geo.get("isp") or "") if geo.get("isp") else ""))
-        parts_.append("内网网卡 / 网关 / DNS 详见下方 ipconfig /all")
+        parts_.append("内网网卡 / 网关 / DNS 详见下方接口与路由输出")
         return "\n".join(parts_)
 
     with ThreadPoolExecutor(max_workers=7) as pool:
@@ -232,7 +273,7 @@ def build_report(note=""):
         except Exception as e:
             parts.append(_section("网络概况", "获取失败: " + str(e)))
         mapping = [
-            ("ipconfig /all", "ipconfig", 30000),
+            (ipcfg_title, "ipconfig", 30000),
             ("路由表", "route", 20000),
             ("ARP 表", "arp", 20000),
         ]
@@ -245,7 +286,7 @@ def build_report(note=""):
         text = "\n".join(lines[:400])
         if len(lines) > 400:
             text += f"\n...（共 {len(lines)} 行，已截断）"
-        parts.append(_section("netstat -ano", text, 40000))
+        parts.append(_section(netstat_title, text, 40000))
         out, _ = futures["winhttp"].result()
         parts.append(_section("WinHTTP 代理", out))
         pe, _ = futures["proxy_enable"].result()

@@ -362,6 +362,19 @@ function stopRun() {
   setBusy(false);
 }
 
+window.APP_INFO = { platform: 'windows', os_label: 'Windows', features: {} };
+
+function applyAppInfo(d) {
+  if (!d || !d.ok) return;
+  window.APP_INFO = d;
+  const lab = document.getElementById('osLabel');
+  if (lab && d.os_label) lab.textContent = d.os_label;
+}
+
+function isWindowsPlatform() {
+  return (window.APP_INFO && window.APP_INFO.platform) ? window.APP_INFO.platform === 'windows' : true;
+}
+
 function renderTiles() {
   const grids = { detect: $('grid-detect'), query: $('grid-query'), adv: $('grid-adv') };
   TOOLS.forEach(t => {
@@ -378,6 +391,107 @@ function renderTiles() {
       openTool(t);
     };
     (grids[t.group] || grids.detect).appendChild(tile);
+  });
+}
+
+const SEARCH_ALIASES = {
+  ping: 'icmp 连通 ping',
+  pingpp: 'ping++ pingplus 持续探测',
+  traceroute: 'tracert 路由追踪 trace',
+  mtr: 'mtr 逐跳 丢包',
+  portscan: '端口探测 扫描 port scan',
+  fetch: '抓取页面 http curl',
+  download: '下载测试',
+  probe: '服务器探测 tls 证书',
+  timing: 'http速度 ttfb timing',
+  speed: '测速 speedtest',
+  dns: '域名解析 dns lookup',
+  cndns: '全国dns 运营商',
+  httpadv: 'http高级',
+  iplocal: '你的ip信息 本机 网卡',
+  iploc: 'ip查询 归属地 whois',
+  dnsip: 'dnsip 正反查 ptr',
+  ipcalc: 'ip计算器 cidr 掩码',
+  ts: '时间转化 时间戳 timestamp',
+  codec: '编码 加密 base64 md5 sha',
+  qr: '二维码 qrcode',
+  tcping: 'tcping tcp ping',
+  superping: '超级ping 多主机',
+  ipscan: 'ip扫描 网段',
+  lanscan: '扫描局域网 arp 设备',
+  triprobe: '三网拨测 阿里云 boce',
+  wlan: 'wlan wifi 无线 热点',
+  telnet: 'telnet banner',
+  windiag: 'windows诊断 体检',
+  diagnose: '网络诊断',
+  sitecompare: '站点对比',
+  batch: '批量任务',
+  dig: 'dig dns',
+  whois: 'whois 域名',
+  ua: 'useragent user-agent ua',
+  jsonfmt: 'json格式化',
+  baseconv: '进制转换 hex',
+  wol: '唤醒 wake-on-lan wol 魔术包',
+  iperf3: 'iperf 吞吐',
+  mtu: 'mtu 分片',
+  netstat: '端口占用 连接 netstat',
+  routes: '路由表 route',
+  arp: 'arp 表 邻居 mac',
+  ifstat: '网卡流量 速率 bandwidth',
+  nattype: 'nat 类型 stun 锥型 对称',
+  mux: '网卡叠加 聚合 多网卡 hypomux bond 代理 socks',
+  svrextract: '服务器信息提取 合营云 工单 cmdb sn bmc',
+  ssh: 'ssh 终端 远程 shell putty'
+};
+
+function toolSearchHay(t) {
+  return [t.id, t.name, t.sub || '', SEARCH_ALIASES[t.id] || ''].join(' ').toLowerCase();
+}
+
+function applyToolSearch(q) {
+  const needle = (q || '').trim().toLowerCase();
+  let visible = 0;
+  TOOLS.forEach(t => {
+    const tile = document.querySelector('.tile[data-id="' + t.id + '"]');
+    if (!tile) return;
+    const show = !needle || toolSearchHay(t).indexOf(needle) !== -1;
+    tile.classList.toggle('search-miss', !show);
+    if (show) visible++;
+  });
+  ['detect', 'query', 'adv'].forEach(g => {
+    const grid = $('grid-' + g);
+    if (!grid) return;
+    const any = grid.querySelectorAll('.tile:not(.search-miss)').length > 0;
+    grid.classList.toggle('search-empty', !any);
+  });
+  const empty = $('searchEmpty');
+  if (empty) empty.hidden = !needle || visible > 0;
+  return visible;
+}
+
+function bindToolSearch() {
+  const input = $('toolSearch');
+  if (!input) return;
+  const onInput = () => applyToolSearch(input.value);
+  input.addEventListener('input', onInput);
+  input.addEventListener('search', onInput);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      input.value = '';
+      applyToolSearch('');
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const q = input.value.trim().toLowerCase();
+    if (!q) return;
+    const hits = TOOLS.filter(t => {
+      const tile = document.querySelector('.tile[data-id="' + t.id + '"]');
+      return tile && !tile.classList.contains('search-miss') && !t.disabled;
+    });
+    if (hits.length === 1) openTool(hits[0]);
   });
 }
 
@@ -837,8 +951,9 @@ function tickClock() {
   $('clock').textContent = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function init() {
+function bootUI() {
   renderTiles();
+  bindToolSearch();
   tickClock();
   setInterval(tickClock, 15000);
   $('runBtn').onclick = run;
@@ -893,6 +1008,10 @@ function init() {
     if (e.key === 'Escape' && !$('toolView').hidden) closeTool();
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !$('toolView').hidden) run();
   });
+}
+
+function init() {
+  fetch('/api/settings').then(r => r.json()).then(applyAppInfo).catch(() => {}).finally(bootUI);
 }
 
 init();

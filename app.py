@@ -1,9 +1,9 @@
-"""网络工具 — Windows 桌面版入口。
+"""网络工具 — 桌面版入口（Windows / macOS）。
 
-默认用 pywebview 打开独立窗口。关闭窗口会隐藏到托盘并保持运行；
+默认用 pywebview 打开独立窗口。关闭窗口会隐藏到托盘（Windows）或保持在菜单栏 / Dock（macOS）；
 只有托盘「退出」或设置里的「退出程序」才会彻底结束进程。
-「最小化运行」默认开启。需要打开的网页在软件内的子窗口访问，不跳系统浏览器。
-运行时文件位于 %LOCALAPPDATA%\\网络工具\\，不会在 exe 旁创建 data 目录。
+点减号最小化到任务栏 / Dock；点关闭才隐藏到后台。需要打开的网页在软件内的子窗口访问，不跳系统浏览器。
+运行时文件位于各平台用户数据目录，不会在程序旁创建 data 目录。
 """
 from __future__ import annotations
 
@@ -1125,12 +1125,6 @@ def _on_closed():
         return
 
 
-def _on_minimized():
-    if app_settings.load().get("minimize_to_tray"):
-        _ensure_tray()
-        hide_window()
-
-
 def _stop_tray():
     global _tray
     icon = _tray
@@ -1190,7 +1184,6 @@ def main():
     os.makedirs(RUN_DIR, exist_ok=True)
     _setup_background_logging()
 
-    startup = "--startup" in sys.argv
     if not _acquire_single_instance():
         _open_existing_instance()
         sys.exit(0)
@@ -1213,7 +1206,7 @@ def main():
     ]
     if port != want:
         banner.append(f"  提示: 端口 {want} 被占用，已改用 {port}")
-    banner.append("  关闭窗口会隐藏到托盘并保持运行；托盘「退出」可结束进程")
+    banner.append("  点减号最小化到任务栏；点关闭隐藏到托盘。托盘「退出」可结束进程")
     banner.append("")
     print("\n".join(banner), flush=True)
 
@@ -1231,9 +1224,8 @@ def main():
     except Exception:
         pass
 
-    cfg = app_settings.load()
-    # 开机自启时，仅当开启了「最小化运行」才先进入托盘
-    hidden = startup and bool(cfg.get("minimize_to_tray"))
+    # 开机自启也正常显示主窗口；只有点关闭才会进托盘。减号是普通最小化。
+    hidden = False
     no_window = os.environ.get("NETMETER_NO_WINDOW") or os.environ.get("NETMETER_HEADLESS")
 
     if no_window:
@@ -1293,13 +1285,8 @@ def main():
         _window.events.closed += _on_closed
     except Exception:
         pass
-    for ev_name in ("minimized", "moved"):
-        ev = getattr(_window.events, ev_name, None)
-        if ev_name == "minimized" and ev is not None:
-            try:
-                ev += _on_minimized
-            except Exception:
-                pass
+    # 不监听 minimized：减号必须走系统普通最小化，窗口留在任务栏。
+    # 只有 closing 才会 hide 到托盘。
 
     _sync_tray()
 
@@ -1309,7 +1296,13 @@ def main():
         _sync_tray()
 
     start_kwargs = {"debug": False}
-    gui = os.environ.get("NETMETER_GUI", "edgechromium")
+    if sys.platform == "darwin":
+        default_gui = "cocoa"
+    elif os.name == "nt":
+        default_gui = "edgechromium"
+    else:
+        default_gui = "gtk"
+    gui = os.environ.get("NETMETER_GUI", default_gui)
     started = False
     for attempt in (
         lambda: webview.start(_on_gui_ready, gui=gui, icon=ico, **start_kwargs),

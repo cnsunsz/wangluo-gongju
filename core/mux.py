@@ -1,7 +1,7 @@
 """连接级多网卡聚合：本机 HTTP / SOCKS5 代理，把新连接分配到选中网卡。
 
-每个新建 TCP 绑定到一张已选网卡的 IPv4，并在 Windows 上设置 IP_UNICAST_IF，
-避免被默认路由抢走出口。这不是拆单条 TCP，也不是 L2 bonding，不能让
+每个新建 TCP 绑定到一张已选网卡的 IPv4；Windows 再设 IP_UNICAST_IF，
+macOS 再设 IP_BOUND_IF，避免被默认路由抢走出口。这不是拆单条 TCP，也不是 L2 bonding，不能让
 单连接测速变成多条链路之和。适合浏览器、下载器、Steam 等多连接场景。
 
 独立实现，未使用任何第三方聚合软件的源码。
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import select
 import socket
 import struct
@@ -134,10 +135,102 @@ $j = ConvertTo-Json -InputObject @($nics) -Compress -Depth 5
     return out
 
 
+def _hardware_port_kinds() -> dict[str, str]:
+    """macOS: networksetup 给出 Device -> Wi-Fi / 以太网。"""
+    if sys.platform != "darwin":
+        return {}
+    out, _ = run_cmd(["/usr/sbin/networksetup", "-listallhardwareports"], 8)
+    kinds = {}
+    dev, port = "", ""
+    for line in (out or "").splitlines():
+        s = line.strip()
+        if s.lower().startswith("hardware port:"):
+            port = s.split(":", 1)[-1].strip()
+        elif s.lower().startswith("device:"):
+            dev = s.split(":", 1)[-1].strip()
+            low = port.lower()
+            if "wi-fi" in low or "wifi" in low or "airport" in low:
+                kinds[dev] = "Wi-Fi"
+            elif "ether" in low or "lan" in low or "thunderbolt" in low or "usb" in low:
+                kinds[dev] = "有线"
+            elif dev:
+                kinds[dev] = port or "其他"
+    return kinds
+
+
+def _list_adapters_darwin() -> list[dict]:
+    out, _ = run_cmd(["/sbin/ifconfig"], 8)
+    blocks: list[dict] = []
+    current = None
+    for line in (out or "").splitlines():
+        if line and not line[:1].isspace() and ":" in line:
+            name = line.split(":", 1)[0].strip()
+            current = {
+                "name": name, "flags": line, "ipv4": "", "prefix": 24,
+                "mac": "", "up": "UP" in line.split(":", 1)[-1],
+            }
+            blocks.append(current)
+            continue
+        if not current:
+            continue
+        s = line.strip()
+        if s.startswith("inet ") and not s.startswith("inet6"):
+            parts = s.split()
+            if len(parts) >= 2 and not parts[1].startswith("127."):
+                current["ipv4"] = parts[1]
+            if "netmask" in parts:
+                try:
+                    nm = parts[parts.index("netmask") + 1]
+                    current["prefix"] = bin(int(nm, 16)).count("1") if nm.startswith("0x") else 24
+                except (ValueError, IndexError):
+                    pass
+        elif s.startswith("ether ") and len(s.split()) >= 2:
+            current["mac"] = s.split()[1]
+    gw, gw_if = "", ""
+    gout, _ = run_cmd(["/sbin/route", "-n", "get", "default"], 5)
+    for line in (gout or "").splitlines():
+        if "interface:" in line:
+            gw_if = line.split(":", 1)[-1].strip()
+        elif "gateway:" in line:
+            gw = line.split(":", 1)[-1].strip()
+    kinds = _hardware_port_kinds()
+    rows = []
+    for b in blocks:
+        name = b["name"]
+        if not b.get("ipv4") or not b.get("up") or name.startswith("lo"):
+            continue
+        low = name.lower()
+        kind = kinds.get(name) or "其他"
+        if kind == "其他":
+            if low.startswith(("wl", "awdl")):
+                kind = "Wi-Fi"
+            elif low.startswith(("en", "eth")):
+                kind = "有线"
+            elif low.startswith(("utun", "ipsec", "ppp", "bridge", "vmnet", "ap")):
+                kind = "虚拟/VPN"
+        try:
+            idx = socket.if_nametoindex(name)
+        except OSError:
+            idx = 0
+        rows.append({
+            "id": str(idx or name), "name": name, "description": name, "kind": kind,
+            "ipv4": b["ipv4"], "prefix": int(b.get("prefix") or 24),
+            "gateway": gw if name == gw_if else "",
+            "ifindex": idx, "mac": b.get("mac") or "", "status": "Up", "speed": "",
+        })
+    return rows
+
+
 def _list_adapters_posix() -> list[dict]:
+    if sys.platform == "darwin":
+        try:
+            rows = _list_adapters_darwin()
+            if rows:
+                return rows
+        except Exception:
+            pass
     out = []
     try:
-        import ipaddress
         for info in socket.if_nameindex():
             idx, name = info[0], info[1]
             if name.startswith("lo"):
@@ -185,7 +278,11 @@ def pick_port(preferred: int, host: str = "127.0.0.1") -> int:
     return want
 
 
-def bind_outbound(sock: socket.socket, ipv4: str, ifindex: int) -> None:
+# Darwin netinet/in.h
+IP_BOUND_IF = 25
+
+
+def bind_outbound(sock: socket.socket, ipv4: str, ifindex: int, ifname: str = "") -> None:
     sock.bind((ipv4, 0))
     if os.name == "nt" and ifindex:
         try:
@@ -196,6 +293,19 @@ def bind_outbound(sock: socket.socket, ipv4: str, ifindex: int) -> None:
                 sock.setsockopt(socket.IPPROTO_IP, IP_UNICAST_IF, socket.htonl(int(ifindex)))
             except OSError:
                 pass
+    elif sys.platform == "darwin" and ifindex:
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, IP_BOUND_IF, int(ifindex))
+        except OSError:
+            try:
+                sock.setsockopt(socket.IPPROTO_IP, IP_BOUND_IF, struct.pack("I", int(ifindex)))
+            except OSError:
+                pass
+    elif sys.platform.startswith("linux") and ifname:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, ifname.encode("utf-8") + b"\0")
+        except OSError:
+            pass
 
 
 def _connect_via(host: str, port: int, nic: dict, timeout: float = 15.0) -> socket.socket:
@@ -208,7 +318,7 @@ def _connect_via(host: str, port: int, nic: dict, timeout: float = 15.0) -> sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        bind_outbound(sock, nic["ipv4"], int(nic.get("ifindex") or 0))
+        bind_outbound(sock, nic["ipv4"], int(nic.get("ifindex") or 0), str(nic.get("name") or ""))
         sock.settimeout(timeout)
         sock.connect(dest)
         sock.settimeout(None)

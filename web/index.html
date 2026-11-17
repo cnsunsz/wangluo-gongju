@@ -13,10 +13,11 @@
   <div class="brand">
     <img class="logo" src="favicon.png" alt="" width="28" height="28">
     <span class="title">网络工具</span>
-    <span class="ver">Windows</span>
+    <span class="ver" id="osLabel">Windows</span>
     <span class="author">作者：Lorenzo</span>
   </div>
   <div class="top-right">
+    <input type="search" id="toolSearch" class="tool-search" placeholder="搜索工具" autocomplete="off" spellcheck="false" aria-label="搜索工具">
     <a class="help-link" href="#" id="settingsLink">设置</a>
     <a class="help-link" href="#" id="aiSetLink">AI 设置</a>
     <a class="help-link" href="#" id="helpLink">功能说明</a>
@@ -25,6 +26,7 @@
 </header>
 
 <main class="home" id="home">
+  <p class="search-empty" id="searchEmpty" hidden>没有找到匹配的工具</p>
   <div class="grid" id="grid-detect"></div>
   <div class="divider"></div>
   <div class="grid" id="grid-query"></div>
@@ -88,7 +90,7 @@
       <input id="aiKey" type="password" placeholder="已保存时留空即保持不变">
       <label for="aiSystem">系统提示（可选）</label>
       <textarea id="aiSystem" rows="3" placeholder="留空使用内置网络运维提示词"></textarea>
-      <p class="modal-note">Key 仅保存在本机（%LOCALAPPDATA%\网络工具\config\ai.json），不会上传；分析时只发送当前工具的输出，不发送其他文件。</p>
+      <p class="modal-note">Key 仅保存在本机配置目录（config/ai.json），不会上传；分析时只发送当前工具的输出，不发送其他文件。</p>
       <div class="modal-msg" id="aiMsg"></div>
     </div>
     <div class="modal-foot">
@@ -104,20 +106,13 @@
     <div class="modal-head"><b>设置</b><button class="modal-close" id="settingsClose" type="button">&times;</button></div>
     <div class="modal-body settings-body">
       <label class="switch-row">
-        <input type="checkbox" id="setMinimize">
-        <span>
-          <b>最小化运行</b>
-          <small>最小化时隐藏到系统托盘（网络图标），点击托盘图标可恢复窗口。</small>
-        </span>
-      </label>
-      <label class="switch-row">
         <input type="checkbox" id="setAutostart">
         <span>
           <b>开机自启</b>
-          <small>登录 Windows 后自动启动。若已开启「最小化运行」，开机后会先进入托盘。</small>
+          <small id="autostartHint">登录后自动启动并显示主窗口。点关闭仍会隐藏到后台。</small>
         </span>
       </label>
-      <p class="modal-note">关闭窗口会隐藏到托盘并保持运行，不会退出。只有托盘菜单「退出」或下方「退出程序」才会彻底结束进程。</p>
+      <p class="modal-note">点标题栏「减号」会最小化到任务栏（Windows）或 Dock（macOS），可再点图标恢复。点「关闭」才会隐藏到托盘 / 菜单栏并保持运行。只有托盘或菜单栏「退出」，或下方「退出程序」，才会彻底结束进程。</p>
       <p class="modal-note" id="settingsPath">配置与日志保存在本机 LocalAppData，不会在程序目录创建 data 文件夹。</p>
       <div class="modal-msg" id="settingsMsg"></div>
     </div>

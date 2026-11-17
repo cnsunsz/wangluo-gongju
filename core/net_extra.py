@@ -742,7 +742,7 @@ def find_iperf3():
     if meipass:
         bases.append(meipass)
     for base in bases:
-        for rel in ("bin/iperf3.exe", "iperf3.exe"):
+        for rel in ("bin/iperf3.exe", "bin/iperf3", "iperf3.exe", "iperf3"):
             path = os.path.join(base, *rel.split("/"))
             if os.path.isfile(path):
                 return path
@@ -756,10 +756,10 @@ def iperf3_stream(host, port=5201, seconds=10, reverse=False):
     exe = find_iperf3()
     yield {"type": "start", "host": host, "port": port, "seconds": seconds, "exe": exe or ""}
     if not exe:
-        yield {"type": "log", "text": "本机未检测到 iperf3.exe。"}
-        yield {"type": "log", "text": "下载 Windows 版：https://iperf.fr/iperf-download.php"}
-        yield {"type": "log", "text": "解压后把 iperf3.exe 放到系统 PATH 或本程序目录，再重新运行。"}
-        yield {"type": "error", "message": "未找到 iperf3.exe"}
+        yield {"type": "log", "text": "本机未检测到 iperf3。"}
+        yield {"type": "log", "text": "可从 https://iperf.fr/iperf-download.php 下载，或在 macOS 上用 brew install iperf3。"}
+        yield {"type": "log", "text": "把 iperf3（Windows 为 iperf3.exe）放到系统 PATH 或本程序目录后再运行。"}
+        yield {"type": "error", "message": "未找到 iperf3"}
         return
     cmd = [exe, "-c", host, "-p", str(port), "-t", str(seconds)]
     if str(reverse) in ("1", "true", "True") or reverse is True:
@@ -816,6 +816,8 @@ def iperf3_stream(host, port=5201, seconds=10, reverse=False):
 
 
 def wlan_status():
+    if os.name != "nt":
+        return {"available": False, "ssid": "", "message": "WLAN 分析仅在 Windows 上提供"}
     out, _ = run_cmd(["netsh", "wlan", "show", "interfaces"], timeout=12)
     low = (out or "").lower()
     if any(k in low for k in ("没有无线接口", "no wireless interface")) or (

@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -57,32 +57,103 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wangluo-gongju
-          path: |
-            dist/网络工具.exe
-            dist/WangLuoGongJu-*.exe
+          name: windows-exe
+          path: dist/WangLuoGongJu-*.exe
           if-no-files-found: error
 
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build macOS arm64 zip
+        run: bash build-macos.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: dist/WangLuoGongJu-*-macOS-arm64.zip
+          if-no-files-found: error
+
+  build-macos-intel:
+    runs-on: macos-13
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build macOS x64 zip
+        run: bash build-macos.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64
+          path: dist/WangLuoGongJu-*-macOS-x64.zip
+          if-no-files-found: warn
+
+  release:
+    needs: [build-windows, build-macos, build-macos-intel]
+    if: ${{ always() && startsWith(github.ref, 'refs/tags/') && needs.build-windows.result == 'success' && needs.build-macos.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lah artifacts
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: 网络工具 ${{ github.ref_name }}
-          files: dist/WangLuoGongJu-${{ github.ref_name }}.exe
+          fail_on_unmatched_files: false
+          files: |
+            artifacts/WangLuoGongJu-${{ github.ref_name }}.exe
+            artifacts/WangLuoGongJu-${{ github.ref_name }}-macOS-arm64.zip
+            artifacts/WangLuoGongJu-${{ github.ref_name }}-macOS-x64.zip
           generate_release_notes: false
           body: |
-            Windows 单文件版「网络工具」**1.2.0**。请下载 `WangLuoGongJu-v1.2.0.exe`，可改名为「网络工具.exe」后双击使用。无需安装，不会在 exe 旁边创建 data 文件夹。
+            「网络工具」**${{ github.ref_name }}**，提供 Windows 与 macOS 桌面版。
 
-            配置与日志位于 `%LOCALAPPDATA%\网络工具\`。运行需要 Windows 10/11，以及 WebView2（Windows 11 通常已自带）。
+            ## 下载
 
-            ## 本版更新
+            - **Windows 10/11**：[`WangLuoGongJu-${{ github.ref_name }}.exe`](https://github.com/cnsunsz/wangluo-gongju/releases/download/${{ github.ref_name }}/WangLuoGongJu-${{ github.ref_name }}.exe)（可改名为「网络工具.exe」后双击使用）。需要 WebView2（Windows 11 通常已自带）。
+            - **macOS Apple Silicon（arm64）**：[`WangLuoGongJu-${{ github.ref_name }}-macOS-arm64.zip`](https://github.com/cnsunsz/wangluo-gongju/releases/download/${{ github.ref_name }}/WangLuoGongJu-${{ github.ref_name }}-macOS-arm64.zip)。解压得到「网络工具.app」。
+            - **macOS Intel（x64）**：若本次构建成功，同目录还有 `WangLuoGongJu-${{ github.ref_name }}-macOS-x64.zip`。
 
-            - **最小化运行默认开启**：最小化时隐藏到系统托盘，可在窗口右上角「设置」中关闭。
-            - **关闭窗口默认留在后台**：已去掉「保留后台运行」开关。关闭窗口会隐藏到托盘并保持运行；只有托盘「退出」或「设置 → 退出程序」才会彻底结束进程。
-            - **开机自启**：若已开启「最小化运行」，登录 Windows 后会先进入托盘。
-            - **网页在软件内打开**：例如「三网拨测」会在软件里新开窗口访问阿里云拨测页，不再跳到系统浏览器。关闭子窗口不影响主程序。
-            - **已删除「分享软件」**（原先置灰的手机端入口）。
-            - **网卡叠加**：连接级多网卡聚合。勾选网卡后启动本机 HTTP / SOCKS5 代理，每条新连接绑定到一张网卡；可选接管当前用户系统代理，停止或退出时恢复。适合多连接下载，不能把单连接测速变成多条网络之和。
-            - **服务器信息提取**：从告警 / CMDB 原文识别主机名、SN、管理 IP、BMC、型号、机房、故障，并生成「【合营云】区域Server业务主机名硬件故障」标题与七行模板，支持一键复制（粘贴或读剪贴板）。
-            - **SSH**：软件内终端，可保存 / 编辑 / 删除常用主机。密码默认不保存；「记住密码」用当前 Windows 用户 DPAPI 加密后存在本机。私钥只引用本机路径。
-            - **其它新工具**：路由表、ARP 表、网卡实时流量、NAT 类型检测。
+            macOS 包未经 Apple 公证。第一次打开请按住 Control 点击「网络工具.app」选择「打开」，或在「系统设置 → 隐私与安全性」中允许。也可在终端执行 `xattr -dr com.apple.quarantine 网络工具.app` 后再打开。
+
+            无需安装，不会在程序旁边创建 data 文件夹。
+
+            配置与日志：
+            - Windows：`%LOCALAPPDATA%\网络工具\`
+            - macOS：`~/Library/Application Support/网络工具/`
+
+            ## 1.2.1 更新
+
+            - **减号最小化到任务栏 / Dock**：点窗口「减号」（macOS 为黄灯）只做普通最小化，窗口留在任务栏或 Dock，再点图标即可恢复。不会隐藏到托盘，也不会从任务栏 / Dock 消失。已去掉「最小化运行」开关。
+            - **关闭才进后台**：点「关闭」仍然隐藏到托盘（Windows）或菜单栏 / 后台（macOS）并保持运行；只有托盘或菜单栏「退出」，或「设置 → 退出程序」，才会彻底结束进程。开机自启会正常显示主窗口。
+            - **标题栏搜索工具**：在「设置」左侧增加「搜索工具」输入框，可按中文名称或常见英文（如 ping、ssh）即时过滤主界面图标。清空后恢复全部；在搜索框按 Enter 若只剩一项则打开该工具，Esc 清空。
+            - **新增 macOS 版**：Apple Silicon 优先，并尝试提供 Intel 包。SSH、服务器信息提取、搜索栏、关闭进后台等通用能力可用。Windows 诊断、WLAN 分析仅在 Windows 显示。网卡叠加在 Mac 上使用源地址绑定 + `IP_BOUND_IF`，不接管系统代理，请在应用里手动填写本地 HTTP / SOCKS5 代理。开机自启写入当前用户 LaunchAgents。
+
+            ## 1.2.0 已有能力
+
+            - 网页在软件内打开（例如三网拨测），不跳系统浏览器。
+            - 已删除「分享软件」。
+            - 网卡叠加、服务器信息提取、SSH（可保存主机）、路由表、ARP 表、网卡实时流量、NAT 类型检测。

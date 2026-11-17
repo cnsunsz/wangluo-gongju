@@ -1,15 +1,18 @@
-"""tracert / MTR 风格路径探测。"""
+"""traceroute / tracert / MTR 风格路径探测。"""
 from __future__ import annotations
 
+import os
 import re
+import shutil
 import subprocess
+import sys
 import time
 
 from . import procs
 from .util import CREATE_NO_WINDOW, decode_output, safe_host, to_int
 
 RE_HOP = re.compile(r"^\s*(\d+)\s+(\S.*)$")
-RE_MS = re.compile(r"(\d+)\s*(?:ms|毫秒)", re.I)
+RE_MS = re.compile(r"(\d+(?:\.\d+)?)\s*(?:ms|毫秒)", re.I)
 RE_IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 RE_IPV6 = re.compile(r"\b(?:[0-9A-Fa-f]{1,4}:){2,}[0-9A-Fa-f:]*\b")
 FINISH_MARKS = ("跟踪完成", "trace complete", "追踪完成")
@@ -58,10 +61,23 @@ def parse_hop_line(line):
 
 
 def _trace_cmd(host, maxhops, timeout_ms, family):
-    cmd = ["tracert"]
-    if int(family) == 6:
-        cmd.append("-6")
-    cmd += ["-d", "-h", str(maxhops), "-w", str(timeout_ms), host]
+    if os.name == "nt":
+        cmd = ["tracert"]
+        if int(family) == 6:
+            cmd.append("-6")
+        cmd += ["-d", "-h", str(maxhops), "-w", str(int(timeout_ms)), host]
+        return cmd
+    exe = shutil.which("traceroute") or shutil.which("traceroute6" if int(family) == 6 else "") or "traceroute"
+    cmd = [exe, "-n", "-m", str(maxhops)]
+    # Unix -w 为秒
+    wait_s = max(1, int((int(timeout_ms) + 999) // 1000))
+    cmd += ["-w", str(wait_s)]
+    if int(family) == 6 and "6" not in os.path.basename(exe):
+        if sys.platform == "darwin":
+            cmd.append("-6")
+        else:
+            cmd += ["-6"]
+    cmd.append(host)
     return cmd
 
 

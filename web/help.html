@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>网络工具 Windows · 功能说明</title>
+<title>网络工具 · 功能说明</title>
 <style>
 :root{--brand:#3a4a9e;--brand2:#4455b0;--red:#e2271c;--blue:#189ce4;--pink:#ea2469;
 --ink:#26323f;--muted:#7b8794;--line:#e6ebf2;--bg:#fdfefe}
@@ -55,11 +55,12 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
 <body>
 <header>
   <div class="wrap">
-    <h1>网络工具 <span class="tag">Windows 版 1.2.0</span></h1>
-    <p class="sub">47 个网络工具，独立桌面窗口运行。关闭窗口会隐藏到托盘并保持运行；网页在软件内打开。免安装、免管理员权限，数据只保存在本机。</p>
+    <h1>网络工具 <span class="tag">1.2.1 · Windows / macOS</span></h1>
+    <p class="sub">桌面网络工具箱，独立窗口运行（Windows / macOS）。关闭窗口会隐藏到托盘或后台并保持运行；网页在软件内打开。免安装、免管理员权限，数据只保存在本机。</p>
     <p class="author">作者：Lorenzo</p>
     <nav>
       <a href="#start">快速开始</a>
+      <a href="#v121">1.2.1 变化</a>
       <a href="#v120">1.2.0 变化</a>
       <a href="#ai">AI 分析</a>
       <a href="#tools">功能清单</a>
@@ -73,12 +74,20 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
 <main>
   <h2 id="start">快速开始</h2>
   <div class="steps">
-    <div class="step"><b><i>1</i>双击程序</b><span>直接运行「网络工具.exe」（或源码下的 <code>python app.py</code>），会打开独立桌面窗口，不再依赖系统浏览器。</span></div>
-    <div class="step"><b><i>2</i>关闭留在托盘</b><span>关闭窗口会隐藏到托盘并保持运行。「最小化运行」默认开启。彻底退出请用托盘「退出」或「设置 → 退出程序」。</span></div>
-    <div class="step"><b><i>3</i>选工具运行</b><span>点九宫格进入工具，填参数后点「开始」；实时输出可随时「停止」。</span></div>
+    <div class="step"><b><i>1</i>双击程序</b><span>Windows 运行「网络工具.exe」，macOS 打开「网络工具.app」（或源码下的 <code>python app.py</code>），会打开独立桌面窗口，不再依赖系统浏览器。</span></div>
+    <div class="step"><b><i>2</i>关闭留在托盘</b><span>点减号（macOS 为黄灯）会最小化到任务栏 / Dock，可再点图标恢复。点关闭才会隐藏到托盘或菜单栏并保持运行。彻底退出请用托盘 / 菜单栏「退出」或「设置 → 退出程序」。</span></div>
+    <div class="step"><b><i>3</i>选工具运行</b><span>点九宫格进入工具，或用标题栏「搜索工具」按名称/英文过滤。填参数后点「开始」；实时输出可随时「停止」。</span></div>
     <div class="step"><b><i>4</i>复位与导出</b><span>「清空」复位结果；「导出」把参数、指标、表格、日志、二维码保存为 HTML 报告。</span></div>
   </div>
-  <p class="note">服务只监听 127.0.0.1，不对局域网开放。运行日志与配置在 <code>%LOCALAPPDATA%\网络工具\</code>，不会在程序旁边创建 data 文件夹。托盘菜单可「打开窗口」或「退出」（退出会彻底结束进程）。需要打开的外部网页（例如三网拨测）会在软件内弹出子窗口，不会跳到系统浏览器。</p>
+  <p class="note">服务只监听 127.0.0.1，不对局域网开放。运行日志与配置在 Windows 的 <code>%LOCALAPPDATA%\网络工具\</code>，或 macOS 的 <code>~/Library/Application Support/网络工具/</code>，不会在程序旁边创建 data 文件夹。托盘或菜单栏可「打开窗口」或「退出」（退出会彻底结束进程）。需要打开的外部网页（例如三网拨测）会在软件内弹出子窗口，不会跳到系统浏览器。</p>
+
+  <h2 id="v121">1.2.1 有什么变化</h2>
+  <ul class="limit">
+    <li><b>减号最小化到任务栏 / Dock</b>：点窗口「减号」（macOS 为黄灯）只做普通最小化，窗口留在任务栏或 Dock，再点图标即可恢复。不再隐藏到托盘，也不会从任务栏 / Dock 消失。已去掉「最小化运行」开关。</li>
+    <li><b>关闭才进后台</b>：点「关闭」仍然隐藏到托盘（Windows）或菜单栏 / 后台（macOS）并保持运行；只有托盘或菜单栏「退出」，或「设置 → 退出程序」，才会彻底结束进程。开机自启会正常显示主窗口。</li>
+    <li><b>标题栏搜索工具</b>：在「设置」左侧增加「搜索工具」输入框，可按中文名称或常见英文（如 ping、ssh）即时过滤主界面图标。清空后恢复全部；在搜索框按 Enter 若只剩一项则打开该工具，Esc 清空。</li>
+    <li><b>新增 macOS 版</b>：提供 Apple Silicon（arm64）压缩包，并尝试构建 Intel（x64）。包未经 Apple 公证，第一次请按住 Control 点击「打开」，或到「隐私与安全性」允许。SSH、服务器信息提取、搜索栏、关闭进后台可用。「Windows 诊断」「WLAN 分析」仅 Windows 显示。网卡叠加在 Mac 上使用源地址绑定 + IP_BOUND_IF，不接管系统代理。配置在 <code>~/Library/Application Support/网络工具/</code>。</li>
+  </ul>
 
   <h2 id="v120">1.2.0 有什么变化</h2>
   <ul class="limit">
@@ -89,7 +98,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <li><b>已删除「分享软件」</b>：原先置灰的手机端入口已去掉。</li>
     <li><b>网卡叠加</b>：连接级多网卡聚合。选择多张网卡后启动本机 HTTP / SOCKS5 代理，每条新连接绑定到一张网卡。可选接管当前用户系统代理；停止或退出时恢复。适合多连接下载，不能把单条 TCP 测速变成多条链路之和。</li>
     <li><b>服务器信息提取</b>：把告警 / CMDB 原文解析成主机名、SN、管理 IP、BMC、型号、机房、故障，并生成「【合营云】区域Server业务主机名硬件故障」标题，支持一键复制。用粘贴或读剪贴板，没有「从当前浏览器页提取」。</li>
-    <li><b>SSH</b>：软件内终端。可保存 / 编辑 / 删除常用主机（名称、地址、端口、用户名）。密码默认不保存；「记住密码」用当前 Windows 用户 DPAPI 加密后存在本机配置目录，默认关闭。私钥只引用本机路径。</li>
+    <li><b>SSH</b>：软件内终端。可保存 / 编辑 / 删除常用主机（名称、地址、端口、用户名）。密码默认不保存；「记住密码」在 Windows 用当前用户 DPAPI 加密，在 macOS 用本机 Fernet 密钥加密，默认关闭。私钥只引用本机路径。</li>
     <li><b>其它新工具</b>：路由表、ARP 表、网卡流量、NAT 类型检测。</li>
   </ul>
 
@@ -103,7 +112,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   </ul>
 
   <h2 id="tools">功能清单</h2>
-  <p class="note">共 47 项（「WLAN 分析」仅笔记本显示）；<span class="need">需联网</span> 表示依赖外部接口或目标站点。每项运行结果都可点「导出」保存为自包含 HTML（参数、指标、表格、日志、二维码）。</p>
+  <p class="note">Windows 共 47 项（「WLAN 分析」仅检测到无线网卡时显示）；macOS 不显示「Windows 诊断」和「WLAN 分析」；<span class="need">需联网</span> 表示依赖外部接口或目标站点。每项运行结果都可点「导出」保存为自包含 HTML（参数、指标、表格、日志、二维码）。</p>
 
   <h3>检测类 <span class="chip red">红色分组</span></h3>
   <table>
@@ -212,7 +221,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   </div>
   <div class="scene"><b>想把有线和 Wi-Fi 一起给下载器用</b>
     <ol>
-      <li>打开「网卡叠加」，勾选要参与的网卡，建议开启「接管 Windows 系统代理」，再点「启动聚合」。</li>
+      <li>打开「网卡叠加」，勾选要参与的网卡；Windows 上可开启「接管系统代理」，macOS 请在应用中手动填写本地代理，再点「启动聚合」。</li>
       <li>用浏览器或多连接下载工具测试。单线程测速通常不会明显变快，这是正常现象。</li>
       <li>用完后点「停止聚合」，系统代理会恢复。</li>
     </ol>
@@ -229,7 +238,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <thead><tr><th>路径</th><th>说明</th></tr></thead>
     <tbody>
       <tr><td>网络工具.exe</td><td>打包后的单一可执行文件（无控制台、无 _internal、无旁边的 data 目录）</td></tr>
-      <tr><td>%LOCALAPPDATA%\网络工具\</td><td>唯一运行目录：日志、单实例锁、url/pid、<code>settings.json</code>、<code>config\ai.json</code>、<code>config\ssh_hosts.json</code>（SSH 主机，密码若选择记住则 DPAPI 加密）、诊断报告、网卡叠加异常退出时的代理备份。不会在 exe 旁创建 data 文件夹</td></tr>
+      <tr><td>运行时目录</td><td>Windows：<code>%LOCALAPPDATA%\网络工具\</code>；macOS：<code>~/Library/Application Support/网络工具/</code>。内含日志、单实例锁、url/pid、<code>settings.json</code>、<code>config/ai.json</code>、<code>config/ssh_hosts.json</code>（SSH 主机，密码若选择记住则加密存放）、诊断报告、网卡叠加异常退出时的代理备份。不会在程序旁创建 data 文件夹</td></tr>
       <tr><td>app.py</td><td>桌面窗口 + Flask 本地服务（仅监听 127.0.0.1）</td></tr>
       <tr><td>core/</td><td>Ping、路由追踪、端口、HTTP、DNS、本机信息、诊断包等实现</td></tr>
       <tr><td>web/</td><td>首页、工具页、样式与脚本；<code>help.html</code> 即本说明</td></tr>
@@ -249,17 +258,17 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <li>iperf3 需要可访问的 iperf3 服务端；公网 5201 端口常被网络策略阻断，优先用内网服务端。</li>
     <li>「扫描局域网」会过滤代理 ARP、组播和占位 MAC；跨网段设备不会被发现。</li>
     <li>「网卡叠加」是连接级分配，不是虚拟网卡 / TUN，也不是真正的链路聚合；同一出口下的多张网卡无法把单连接带宽叠加。</li>
-    <li>「SSH」首次连接会自动接受主机密钥（保存在本机配置目录）。记住密码仅当前 Windows 用户可解密，仍请避免在公用电脑上勾选。</li>
+    <li>「SSH」首次连接会自动接受主机密钥（保存在本机配置目录）。记住密码仅当前系统用户可解密，仍请避免在公用电脑上勾选。</li>
     <li>诊断包会包含本机网络配置（IP、MAC、路由、连接列表），外发前请确认是否符合内部数据规范。</li>
   </ul>
 
   <h2 id="tech">技术说明</h2>
-  <p class="note">Python 3.13 / Flask 本地服务 + pywebview 桌面窗口；长任务用 SSE 流式推送。关闭窗口会隐藏到托盘并保持运行；「最小化运行」默认开启，可在设置中关闭。外部网页在软件内的子窗口打开。</p>
-  <p class="note">在 Windows 上打包为单个 exe：</p>
+  <p class="note">Python 3.13 / Flask 本地服务 + pywebview 桌面窗口（Windows 用 WebView2，macOS 用 WKWebView）；长任务用 SSE 流式推送。点减号最小化到任务栏 / Dock；点关闭会隐藏到托盘或后台并保持运行。标题栏可搜索工具。外部网页在软件内的子窗口打开。</p>
+  <p class="note">Windows 打包单个 exe：<code>powershell -ExecutionPolicy Bypass -File build.ps1</code>。macOS 打包 .app 并生成 zip：<code>bash build-macos.sh</code>。macOS 包未签名，第一次需右键「打开」。</p>
   <pre><code>powershell -ExecutionPolicy Bypass -File build.ps1</code></pre>
   <p class="note">iperf3 会依次在 PATH、程序目录、<code>_MEIPASS</code> 中查找 <code>bin/iperf3.exe</code>。旧版若在 exe 旁残留 data 目录，首次启动会把 ai.json 和日志迁移到 LocalAppData。</p>
 
-  <footer>网络工具 Windows 版 1.2.0 · 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
+  <footer>网络工具 1.2.1（Windows / macOS）· 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
 </main>
 </body>
 </html>

@@ -592,6 +592,11 @@ CHECKS = {
 
 
 def windiag_stream(scope="all", focus=""):
+    import os
+    if os.name != "nt":
+        yield {"type": "error", "message": "Windows 诊断仅在 Windows 上提供"}
+        yield {"type": "done"}
+        return
     scope = scope or "all"
     if scope != "all" and scope not in dict(CATEGORIES):
         raise ValueError("未知的诊断范围")

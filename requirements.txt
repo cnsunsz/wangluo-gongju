@@ -9,3 +9,5 @@ pystray>=0.19.5
 pywin32>=306; sys_platform == "win32"
 cryptography>=42.0.0
 paramiko>=3.4.0
+pyobjc-core>=10.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"

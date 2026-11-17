@@ -1,29 +1,44 @@
-"""Windows ping 封装与流式输出。"""
+"""系统 ping 封装与流式输出（Windows / macOS / Linux）。"""
 from __future__ import annotations
 
+import os
 import re
+import sys
 import time
 
 from .util import run_cmd, safe_host, to_int
 
-RE_RTT = re.compile(r"(?:time|时间)\s*[=<]\s*(\d+)\s*ms", re.I)
+RE_RTT = re.compile(r"(?:time|时间)\s*[=<]\s*(\d+(?:\.\d+)?)\s*ms", re.I)
 RE_TTL = re.compile(r"ttl\s*=\s*(\d+)", re.I)
-RE_FROM = re.compile(r"(?:reply from|来自)\s*([0-9A-Fa-f.:]+)", re.I)
+RE_FROM = re.compile(r"(?:reply from|bytes from|来自)\s*([0-9A-Fa-f.:]+)", re.I)
 TIMEOUT_MARKS = (
-    "请求超时", "request timed out", "无法访问目标主机",
-    "destination host unreachable", "一般故障", "general failure",
-    "传输失败", "transmit failed", "无法访问",
+    "请求超时", "request timed out", "request timeout", "100% packet loss",
+    "无法访问目标主机", "destination host unreachable", "no route to host",
+    "一般故障", "general failure", "传输失败", "transmit failed", "无法访问",
+    "unknown host", "name or service not known",
 )
-EXPIRED_MARKS = ("ttl 传输中过期", "ttl expired in transit", "ttl expired")
+EXPIRED_MARKS = ("ttl 传输中过期", "ttl expired in transit", "ttl expired", "time to live exceeded")
 
 
 def _cmd(host, family, size, timeout_ms, ttl=None):
+    """构造一次探测的 ping 命令。Windows 用 -n/-w/-l；Unix 用 -c/-s，超时单位因平台而异。"""
     cmd = ["ping"]
     if int(family) == 6:
         cmd.append("-6")
-    cmd += ["-n", "1", "-w", str(timeout_ms), "-l", str(size)]
-    if ttl is not None:
-        cmd += ["-i", str(ttl)]
+    if os.name == "nt":
+        cmd += ["-n", "1", "-w", str(int(timeout_ms)), "-l", str(int(size))]
+        if ttl is not None:
+            cmd += ["-i", str(int(ttl))]
+    else:
+        cmd += ["-c", "1", "-s", str(int(size))]
+        if sys.platform == "darwin":
+            cmd += ["-W", str(max(1, int(timeout_ms)))]  # 毫秒
+            if ttl is not None:
+                cmd += ["-m", str(int(ttl))]  # IP TTL on Darwin
+        else:
+            cmd += ["-W", str(max(1, int((int(timeout_ms) + 999) // 1000)))]  # 秒
+            if ttl is not None:
+                cmd += ["-t", str(int(ttl))]
     cmd.append(host)
     return cmd
 

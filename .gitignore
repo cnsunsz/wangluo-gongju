@@ -5,3 +5,6 @@ build/
 dist/
 *.spec
 .pytest_cache/
+
+icons/app.icns
+bin/iperf3

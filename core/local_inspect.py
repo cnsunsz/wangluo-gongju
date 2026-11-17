@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import random
 import socket
 import struct
@@ -67,18 +68,7 @@ def route_table(family: str = "all") -> dict:
         if not rows:
             rows = _parse_route_print(family)
     else:
-        out, _ = run_cmd(["ip", "route"], 8)
-        if not out:
-            out, _ = run_cmd(["route", "-n"], 8)
-        for line in out.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            rows.append({
-                "destination": line, "gateway": "", "interface": "",
-                "ifindex": "", "metric": "", "ifmetric": "", "protocol": "",
-                "family": "IPv6" if ":" in line else "IPv4",
-            })
+        rows = _posix_routes(family)
     ipv4 = sum(1 for r in rows if r["family"] == "IPv4")
     ipv6 = sum(1 for r in rows if r["family"] == "IPv6")
     return {"rows": rows, "count": len(rows), "ipv4": ipv4, "ipv6": ipv6}
@@ -145,17 +135,7 @@ def arp_table(query: str = "") -> dict:
         if not rows:
             rows = _parse_arp_a()
     else:
-        out, _ = run_cmd(["ip", "neigh"], 8)
-        if not out:
-            out, _ = run_cmd(["arp", "-an"], 8)
-        for line in out.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            rows.append({
-                "ip": line, "mac": "", "interface": "", "state": "",
-                "family": "IPv6" if ":" in line else "IPv4",
-            })
+        rows = _posix_arp()
     if query:
         rows = [r for r in rows if query in (r["ip"] + " " + r["mac"] + " " + r["interface"] + " " + r["state"]).lower()]
     return {"rows": rows, "count": len(rows)}
@@ -210,7 +190,127 @@ def _adapter_counters_windows() -> list[dict]:
     return rows
 
 
+def _posix_routes(family: str) -> list[dict]:
+    rows = []
+    if sys.platform == "darwin":
+        out, _ = run_cmd(["/usr/sbin/netstat", "-rn", "-f", "inet"], 8)
+        out6, _ = run_cmd(["/usr/sbin/netstat", "-rn", "-f", "inet6"], 8)
+        chunks = []
+        if family != "6":
+            chunks.append(("IPv4", out))
+        if family != "4":
+            chunks.append(("IPv6", out6))
+        for fam, text in chunks:
+            for line in (text or "").splitlines():
+                s = line.strip()
+                if not s or s.startswith("Routing") or s.startswith("Destination") or s.startswith("Internet"):
+                    continue
+                parts = s.split()
+                if len(parts) < 3:
+                    continue
+                rows.append({
+                    "destination": parts[0],
+                    "gateway": parts[1],
+                    "interface": parts[-1],
+                    "ifindex": "", "metric": "", "ifmetric": "", "protocol": "",
+                    "family": fam,
+                })
+        return rows
+    out, _ = run_cmd(["ip", "route"], 8)
+    if not out:
+        out, _ = run_cmd(["route", "-n"], 8)
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if family == "4" and ":" in line:
+            continue
+        if family == "6" and ":" not in line and "default" not in line:
+            continue
+        rows.append({
+            "destination": line, "gateway": "", "interface": "",
+            "ifindex": "", "metric": "", "ifmetric": "", "protocol": "",
+            "family": "IPv6" if ":" in line else "IPv4",
+        })
+    return rows
+
+
+def _posix_arp() -> list[dict]:
+    import re
+    rows = []
+    if sys.platform == "darwin" or True:
+        out, _ = run_cmd(["arp", "-an"], 8)
+        if not out and sys.platform != "darwin":
+            out, _ = run_cmd(["ip", "neigh"], 8)
+            for line in (out or "").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                ip = parts[0] if parts else line
+                mac, iface, state = "", "", ""
+                if "lladdr" in parts:
+                    mac = parts[parts.index("lladdr") + 1] if parts.index("lladdr") + 1 < len(parts) else ""
+                if "dev" in parts:
+                    iface = parts[parts.index("dev") + 1] if parts.index("dev") + 1 < len(parts) else ""
+                if parts:
+                    state = parts[-1]
+                rows.append({
+                    "ip": ip, "mac": mac or "—", "interface": iface,
+                    "state": state, "family": "IPv6" if ":" in ip else "IPv4",
+                })
+            if rows:
+                return rows
+        pat = re.compile(
+            r"\(([^)]+)\)\s+at\s+(\S+)(?:\s+on\s+(\S+))?",
+            re.I,
+        )
+        for line in (out or "").splitlines():
+            m = pat.search(line)
+            if not m:
+                continue
+            ip, mac, iface = m.group(1), m.group(2), m.group(3) or ""
+            if mac.lower() in ("(incomplete)", "incomplete"):
+                mac = "—"
+            else:
+                mac = mac.replace("-", ":").upper()
+            rows.append({
+                "ip": ip, "mac": mac, "interface": iface, "state": "",
+                "family": "IPv6" if ":" in ip else "IPv4",
+            })
+    return rows
+
+
+def _adapter_counters_darwin() -> list[dict]:
+    out, _ = run_cmd(["/usr/sbin/netstat", "-ib"], 8)
+    rows = []
+    ib_i = ob_i = None
+    seen = set()
+    for line in (out or "").splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        if parts[0] == "Name" and "Ibytes" in parts and "Obytes" in parts:
+            ib_i = parts.index("Ibytes")
+            ob_i = parts.index("Obytes")
+            continue
+        if ib_i is None or len(parts) <= max(ib_i, ob_i):
+            continue
+        name = parts[0]
+        if name.startswith("lo") or name in seen:
+            continue
+        try:
+            rx, tx = int(parts[ib_i]), int(parts[ob_i])
+        except (ValueError, IndexError):
+            continue
+        seen.add(name)
+        rows.append({"name": name, "ifindex": 0, "kind": "", "speed": "", "rx": rx, "tx": tx})
+    return rows
+
+
 def _adapter_counters_posix() -> list[dict]:
+    if sys.platform == "darwin":
+        return _adapter_counters_darwin()
     rows = []
     try:
         with open("/proc/net/dev", encoding="utf-8") as f:

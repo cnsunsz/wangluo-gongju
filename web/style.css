@@ -30,12 +30,12 @@ button { font-family: inherit; }
 
 .topbar {
   height: 60px; display: flex; align-items: center; justify-content: space-between;
-  padding: 0 22px; color: #fff;
+  padding: 0 22px; color: #fff; gap: 16px;
   background: linear-gradient(135deg, #4458c4 0%, #2f3f9a 55%, #2a3a86 100%);
   box-shadow: 0 2px 14px rgba(30, 45, 120, .28);
   position: sticky; top: 0; z-index: 20;
 }
-.brand { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 650; letter-spacing: .5px; }
+.brand { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 650; letter-spacing: .5px; flex: 0 1 auto; min-width: 0; }
 .brand .logo {
   width: 28px; height: 28px; border-radius: 8px;
   box-shadow: 0 0 0 2px rgba(255,255,255,.25);
@@ -50,7 +50,28 @@ button { font-family: inherit; }
   margin-left: 6px; font-size: 12px; font-weight: 400;
   letter-spacing: 0; opacity: .75; white-space: nowrap;
 }
-.top-right { font-size: 12.5px; opacity: .92; display: flex; align-items: center; gap: 16px; }
+.top-right { font-size: 12.5px; opacity: .92; display: flex; align-items: center; gap: 14px; flex: 0 0 auto; }
+.tool-search {
+  width: 180px; height: 32px; box-sizing: border-box;
+  border: 1px solid rgba(255,255,255,.5); border-radius: 16px;
+  padding: 0 12px; font-size: 13px; line-height: 32px;
+  color: #1c2430; background: rgba(255,255,255,.92);
+  outline: none; font-family: inherit;
+}
+.tool-search::placeholder { color: #7b8794; }
+.tool-search:focus {
+  background: #fff; border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255,255,255,.22);
+}
+.tool-search::-webkit-search-cancel-button { cursor: pointer; }
+.tile.search-miss { display: none !important; }
+.grid.search-empty { display: none; }
+.divider:has(+ .grid.search-empty) { display: none; }
+.search-empty {
+  text-align: center; color: var(--muted); font-size: 13.5px;
+  padding: 48px 16px; margin: 0;
+}
+.search-empty[hidden] { display: none !important; }
 .help-link {
   color: #fff; text-decoration: none; font-size: 12.5px;
   border-bottom: 1px dashed rgba(255, 255, 255, .45); padding-bottom: 1px;
@@ -292,10 +313,13 @@ pre.raw {
 }
 @media (max-width: 700px) {
   .brand .author { display: none; }
+  .tool-search { width: 150px; }
 }
 @media (max-width: 520px) {
   .grid { grid-template-columns: repeat(2, 1fr); }
   .brand .title { font-size: 17px; }
+  .tool-search { width: 120px; }
+  #clock { display: none; }
 }
 
 
