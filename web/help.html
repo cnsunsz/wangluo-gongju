@@ -55,11 +55,12 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
 <body>
 <header>
   <div class="wrap">
-    <h1>网络工具 <span class="tag">1.2.5 · Windows / macOS</span></h1>
+    <h1>网络工具 <span class="tag">1.2.6 · Windows / macOS</span></h1>
     <p class="sub">桌面网络工具箱，独立窗口运行（Windows / macOS）。关闭窗口会隐藏到托盘或后台并保持运行；网页在软件内打开。免安装，一般免管理员权限。数据只保存在本机。实时抓包在 Windows 上需要自行安装 Npcap，部分环境可能需要管理员权限；打开 pcap 文件不需要。</p>
     <p class="author">作者：Lorenzo</p>
     <nav>
       <a href="#start">快速开始</a>
+      <a href="#v126">1.2.6 变化</a>
       <a href="#v125">1.2.5 变化</a>
       <a href="#v124">1.2.4 变化</a>
       <a href="#v123">1.2.3 变化</a>
@@ -85,6 +86,11 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   </div>
   <p class="note">服务只监听 127.0.0.1，不对局域网开放。运行日志与配置在 Windows 的 <code>%LOCALAPPDATA%\网络工具\</code>，或 macOS 的 <code>~/Library/Application Support/网络工具/</code>，不会在程序旁边创建 data 文件夹。托盘或菜单栏可「打开窗口」或「退出」（退出会彻底结束进程）。需要打开的外部网页（例如三网拨测）会在软件内弹出子窗口，不会跳到系统浏览器。</p>
 
+
+  <h2 id="v126">1.2.6 有什么变化</h2>
+  <ul class="limit">
+    <li><b>分析结论写得更完整详细</b>：选中报文后，「报文分析」会列出多条本包结论，每条都写清协议、收发地址、端口含义（例如 4789 为 VXLAN）、载荷和上下文，并完整展开。抓包页改为可上下滚动的长板，本包结论与整次抓包结论分层显示。</li>
+  </ul>
 
   <h2 id="v125">1.2.5 有什么变化</h2>
   <ul class="limit">
@@ -310,7 +316,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   <pre><code>powershell -ExecutionPolicy Bypass -File build.ps1</code></pre>
   <p class="note">iperf3 会依次在 PATH、程序目录、<code>_MEIPASS</code> 中查找 <code>bin/iperf3.exe</code>。旧版若在 exe 旁残留 data 目录，首次启动会把 ai.json 和日志迁移到 LocalAppData。</p>
 
-  <footer>网络工具 1.2.5（Windows / macOS）· 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
+  <footer>网络工具 1.2.6（Windows / macOS）· 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
 </main>
 </body>
 </html>

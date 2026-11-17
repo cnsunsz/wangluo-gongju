@@ -671,6 +671,69 @@ class TestAnalysis(unittest.TestCase):
         self.assertTrue(cons[0].get("detail"))
         self.assertIn("SYN", (cons[0].get("title") or "") + (cons[0].get("detail") or ""))
 
+    def test_udp_vxlan_not_tcp_flags_and_detailed_conclusions(self):
+        # 与用户截图同类：UDP 10.145.11.162:33111 -> 10.145.32.22:4789
+        payload = b"\x08" + b"\x00" * 7 + b"inner-frame-placeholder" + b"\x00" * 40
+        vxlan = frame(
+            "02:00:00:00:00:02", "02:00:00:00:00:01",
+            ipv4_pkt("10.145.11.162", "10.145.32.22", 17, udp_dgram(33111, 4789, payload)),
+        )
+        other = frame(
+            "02:00:00:00:00:02", "02:00:00:00:00:01",
+            ipv4_pkt("10.145.11.162", "10.145.32.22", 17, udp_dgram(40000, 9999, b"hello-udp-payload")),
+        )
+        self._open([vxlan, other])
+
+        a1 = self._detail(1)["analysis"]
+        cons = a1["conclusions"]
+        self.assertGreaterEqual(len(cons), 2, cons)
+        blob = self._concl_text(a1)
+        for bad in ("标志组合异常", "未置位任何常见标志", "TCP 标志", "三次握手", "纯 ACK"):
+            self.assertNotIn(bad, blob)
+        self.assertIn("UDP", blob)
+        self.assertTrue("VXLAN" in blob or "4789" in blob, blob)
+        self.assertIn("10.145.11.162", blob)
+        self.assertIn("10.145.32.22", blob)
+        for c in cons:
+            self.assertGreaterEqual(len((c.get("detail") or "").strip()), 40, c)
+            self.assertNotIn("…", c.get("detail") or "")
+            self.assertFalse((c.get("detail") or "").endswith("..."))
+
+        a2 = self._detail(2)["analysis"]
+        cons2 = a2["conclusions"]
+        self.assertGreaterEqual(len(cons2), 2, cons2)
+        blob2 = self._concl_text(a2)
+        self.assertNotIn("标志组合异常", blob2)
+        self.assertNotIn("未置位任何常见标志", blob2)
+        self.assertIn("UDP", blob2)
+        for c in cons2:
+            self.assertGreaterEqual(len((c.get("detail") or "").strip()), 40, c)
+
+        diag = session.diagnose()
+        titles = [c["title"] for c in diag["conclusions"]]
+        self.assertIn("TCP 握手", titles)
+        handshake = next(c for c in diag["conclusions"] if c["title"] == "TCP 握手")
+        self.assertIn("没有识别到 TCP", handshake["detail"])
+        all_diag = "\n".join(c.get("detail") or "" for c in diag["conclusions"])
+        self.assertNotIn("已有确认或数据", all_diag)
+
+        # TCP 数据报文仍应给出多条详细结论，而不是一句空话
+        data = frame(
+            "02:00:00:00:00:02", "02:00:00:00:00:01",
+            ipv4_pkt("10.0.0.1", "10.0.0.2", 6, tcp_seg(40000, 80, 1000, 1, 0x18, b"hello-world-data")),
+        )
+        self._open([data])
+        a3 = self._detail(1)["analysis"]
+        cons3 = a3["conclusions"]
+        self.assertGreaterEqual(len(cons3), 2, cons3)
+        t3 = self._concl_text(a3)
+        self.assertIn("携带有效载荷", t3)
+        self.assertIn("10.0.0.1", t3)
+        self.assertTrue("80" in t3 or "HTTP" in t3)
+        payload_c = next(c for c in cons3 if c["title"] == "携带有效载荷")
+        self.assertGreaterEqual(len(payload_c["detail"]), 40)
+        self.assertNotEqual(payload_c["detail"].strip(), "这条报文携带有效载荷。")
+
     def tearDown(self):
         try:
             session.clear_packets()

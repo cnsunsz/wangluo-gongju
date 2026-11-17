@@ -2,7 +2,11 @@
 
 桌面网络工具箱（作者：Lorenzo），提供 **Windows** 与 **macOS** 版本。在本地打开独立窗口，内置 Ping、traceroute、端口扫描、HTTP 探测、DNS、测速、系统体检、抓包分析、网卡叠加、SSH、服务器信息提取等功能（Windows 共 48 项；macOS 隐藏仅 Windows 可用的「Windows 诊断」和「WLAN 分析」）。
 
-当前版本：**1.2.5**。
+当前版本：**1.2.6**。
+
+## 1.2.6 主要变化
+
+- **分析结论写得更完整详细**：选中报文后，「报文分析」会列出多条本包结论，每条都写清协议、收发地址、端口含义（例如 4789 为 VXLAN）、载荷和上下文，并完整展开。抓包页改为可上下滚动的长板，本包结论与整次抓包结论分层显示。
 
 ## 1.2.5 主要变化
 
@@ -68,8 +72,8 @@
 
 在 [Releases](https://github.com/cnsunsz/wangluo-gongju/releases) 下载对应系统的包：
 
-- Windows：`WangLuoGongJu-v1.2.5.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
-- macOS Apple Silicon：`WangLuoGongJu-v1.2.5-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.5-macOS-x64.zip`。
+- Windows：`WangLuoGongJu-v1.2.6.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
+- macOS Apple Silicon：`WangLuoGongJu-v1.2.6-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.6-macOS-x64.zip`。
 
 点减号（macOS 为黄灯）会最小化到任务栏 / Dock，点关闭才会隐藏到后台并保持运行。需要彻底退出时，请用托盘或菜单栏图标「退出」，或打开窗口后到「设置」里点「退出程序」。标题栏「搜索工具」可过滤主界面图标。
 

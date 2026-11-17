@@ -28,6 +28,91 @@ ICMP6 = {
     135: "邻居请求", 136: "邻居通告",
 }
 
+
+UDP_SERVICES = {
+    53: "DNS",
+    67: "DHCP 服务端",
+    68: "DHCP 客户端",
+    69: "TFTP",
+    123: "NTP",
+    137: "NetBIOS 名称服务",
+    138: "NetBIOS 数据报",
+    161: "SNMP",
+    162: "SNMP Trap",
+    443: "HTTPS / QUIC",
+    500: "IKE / IPsec",
+    514: "syslog",
+    520: "RIP",
+    853: "DNS over TLS 或 QUIC",
+    1701: "L2TP",
+    1812: "RADIUS 认证",
+    1813: "RADIUS 计费",
+    4500: "IPsec NAT-T",
+    4789: "VXLAN",
+    5353: "mDNS",
+    5355: "LLMNR",
+    5683: "CoAP",
+    6081: "Geneve",
+    8472: "VXLAN（备选端口）",
+}
+TCP_SERVICES = {
+    20: "FTP 数据", 21: "FTP 控制", 22: "SSH", 23: "Telnet", 25: "SMTP",
+    53: "DNS", 80: "HTTP", 110: "POP3", 143: "IMAP", 389: "LDAP",
+    443: "HTTPS", 445: "SMB", 465: "SMTPS", 587: "SMTP 提交",
+    636: "LDAPS", 993: "IMAPS", 995: "POP3S",
+    1433: "Microsoft SQL Server", 2049: "NFS",
+    3306: "MySQL", 3389: "远程桌面（RDP）", 5432: "PostgreSQL",
+    5900: "VNC", 6379: "Redis", 8080: "HTTP 备选", 8443: "HTTPS 备选",
+}
+_NON_TCP = {"UDP", "ARP", "ICMP", "ICMPV6", "IPV6-ICMP"}
+
+
+def _packet_is_tcp(view: dict) -> bool:
+    """只有真正的 TCP（含 HTTP/TLS 等承载）才按 TCP 标志和序号分析。"""
+    l4 = (view.get("l4") or "").upper()
+    proto = (view.get("protocol") or "").upper()
+    if l4 in _NON_TCP or proto in _NON_TCP:
+        return False
+    return l4 == "TCP" or proto in ("TCP", "HTTP", "TLS", "SSL")
+
+
+def _as_port(value) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _service_name(port, proto: str = "UDP") -> str:
+    port = _as_port(port)
+    if port is None:
+        return ""
+    primary = TCP_SERVICES if (proto or "").upper() in ("TCP", "HTTP", "TLS", "SSL") else UDP_SERVICES
+    return primary.get(port) or ""
+
+
+def _port_context(view: dict, proto: str) -> str:
+    sport, dport = _as_port(view.get("sport")), _as_port(view.get("dport"))
+    parts: list[str] = []
+    ds, ss = _service_name(dport, proto), _service_name(sport, proto)
+    if ds and dport is not None:
+        parts.append(f"目的端口 {dport} 是 {ds} 的常用端口")
+    elif dport is not None:
+        parts.append(f"目的端口 {dport} 不是本工具内置的常见服务端口，不能仅凭端口号断定应用协议")
+    if ss and sport is not None and ss != ds:
+        parts.append(f"源端口 {sport} 是 {ss} 的常用端口")
+    elif sport is not None and not ss:
+        parts.append(f"源端口 {sport} 是临时端口，一般由发送端自动分配")
+    if not parts:
+        return ""
+    text = "；".join(parts) + "。"
+    if ds == "VXLAN" or ss == "VXLAN":
+        text += "VXLAN 用于在 IP 网络上封装二层以太网帧，把虚拟网络标识（VNI）和内层帧放在 UDP 载荷里。"
+    return text
+
+
 _SENSITIVE_HDR = re.compile(
     r"(?im)^((?:set-)?cookie|authorization|proxy-authorization|x-api-key)\s*:\s*.+$"
 )
@@ -301,15 +386,7 @@ def _handshake_state(peers: list[dict]) -> dict:
     ordered = sorted(peers, key=lambda p: (p.get("ts") or 0, p.get("no") or 0))
     for p in ordered:
         flags = int(p.get("tcp_flags") or 0)
-        if not flags and (p.get("l4") or p.get("protocol") or "").upper() not in (
-            "TCP", "HTTP", "TLS", "SSL"
-        ):
-            continue
-        # 应用层协议也是 TCP 载荷
-        is_tcp = (p.get("l4") == "TCP") or (p.get("tcp_flags") is not None) or (
-            (p.get("protocol") or "").upper() in ("TCP", "HTTP", "TLS", "SSL")
-        )
-        if not is_tcp:
+        if not _packet_is_tcp(p):
             continue
         syn_b = _has(flags, "SYN")
         ack_b = _has(flags, "ACK")
@@ -533,6 +610,9 @@ def _build_packet_conclusions(
         if _has(flags, "ACK"):
             ev_seq += f" Ack={view.get('tcp_ack')}"
 
+    layers_s = " / ".join(recognized) if recognized else proto
+    port_txt = _port_context(view, "TCP" if is_tcp or proto in ("TCP", "HTTP", "TLS", "SSL") else proto)
+
     if proto == "ARP" or app.get("arp"):
         arp = app.get("arp") or {}
         op = (arp.get("op") or view.get("info") or "")
@@ -541,13 +621,13 @@ def _build_packet_conclusions(
         sha = arp.get("sha") or ""
         ev = ev_end + (f"；{op}" if op else "")
         if "who has" in op.lower() or "request" in op.lower() or "请求" in op:
-            add("info", "ARP 请求", f"{spa} 询问 {tpa} 的 MAC 地址。", ev)
-            add("info", "局域网地址解析", "ARP 请求通常以广播发送，用于在局域网解析 IPv4 地址对应的硬件地址。")
+            add("info", "ARP 请求", f"这是一条 ARP 请求报文，由 {spa} 发出，询问 {tpa} 当前对应的 MAC 地址。ARP 工作在数据链路层，本身没有 TCP 标志或传输层序号。", ev)
+            add("info", "局域网地址解析", "ARP 请求通常以广播发送到局域网内所有主机，用来把 IPv4 地址解析成对应的硬件（MAC）地址，以便后续封装以太网帧。")
         elif "is at" in op.lower() or "reply" in op.lower() or "应答" in op or "响应" in op:
-            add("info", "ARP 应答", f"{spa} 宣称其 MAC 为 {sha or '（见字段）'}，回答对 {tpa} 的查询。", ev)
-            add("info", "地址绑定", "ARP 应答把 IP 与 MAC 的对应关系告诉请求方。")
+            add("info", "ARP 应答", f"这是一条 ARP 应答报文：{spa} 宣称其 MAC 地址为 {sha or '（见字段）'}，用来回答对 {tpa} 的地址查询。该报文没有 TCP 标志或序号。", ev)
+            add("info", "地址绑定", "ARP 应答把 IP 与 MAC 的对应关系告诉请求方，收到后通常会写入本机 ARP 缓存，供后续向该 IP 发送以太网帧时使用。")
         else:
-            add("info", "ARP 报文", summary or f"这是一条 ARP 报文，从 {src} 到 {dst}。", ev)
+            add("info", "ARP 报文", summary or f"这是一条 ARP 报文，从 {src} 到 {dst}。ARP 用于在局域网解析 IPv4 与 MAC 的对应关系，没有 TCP 标志。", ev)
 
     elif proto in ("ICMP", "ICMPV6") or app.get("icmp"):
         icmp = app.get("icmp") or {}
@@ -570,7 +650,7 @@ def _build_packet_conclusions(
             name = table.get(typ, icmp.get("name") or kind)
             add("info", f"{kind} 报文", summary or f"这是一条 {kind} 报文（{name}），从 {src} 到 {dst}。", ev)
         if ttl is not None:
-            add("info", "生存时间", f"TTL / Hop Limit 为 {ttl}。")
+            add("info", "生存时间", f"这是该报文网络层的生存时间（TTL / Hop Limit），当前值为 {ttl}，表示它在转发路径上还可以经过的跳数上限。")
 
     elif proto == "DNS" or app.get("dns"):
         dns = app.get("dns") or {}
@@ -586,14 +666,14 @@ def _build_packet_conclusions(
             detail += "。"
             add("info", "DNS 应答", detail, ev)
             if rcode and rcode.lower() not in ("no error", "0", "noerror"):
-                add("warn", "DNS 响应码", f"响应码为 {rcode}。", rcode)
+                add("warn", "DNS 响应码", f"这条 DNS 应答的响应码为 {rcode}，表示查询 {qt} {qn} 没有得到正常的成功结果，需要结合具体响应码判断域名是否不存在、是否被拒绝或服务器失败。", rcode)
             elif answers:
-                add("info", "解析结果", f"应答记录：{answers}。", ev)
+                add("info", "解析结果", f"应答中已解出的资源记录为：{answers}。这些记录是服务器对 {qt} {qn} 的回答，可供请求方继续访问对应主机。", ev)
             else:
-                add("info", "应答记录", "应答中未见已解出的资源记录，或记录类型未解析。")
+                add("info", "应答记录", f"这是对 {qt} {qn} 的 DNS 应答，但其中未见已解出的资源记录，或记录类型尚未解析，因此不能断定具体解析结果。")
         else:
-            add("info", "DNS 查询", f"这是一条 DNS 查询，从 {src} 到 {dst}，询问 {qt} {qn}。", ev)
-            add("info", "查询内容", f"查询类型 {qt}，名称 {qn}。")
+            add("info", "DNS 查询", f"这是一条 DNS 查询，从 {src} 发送到 {dst}，询问 {qt} 记录 {qn}，用于把域名解析成地址或其他资源记录。", ev)
+            add("info", "查询内容", f"查询类型为 {qt}，查询名称为 {qn}。若该查询走 UDP，则没有 TCP 标志或序号；具体传输层请结合报文详情中的层次查看。")
 
     elif proto == "HTTP" or app.get("http"):
         http = app.get("http") or {}
@@ -608,7 +688,7 @@ def _build_packet_conclusions(
             detail += "。"
             add("info", "HTTP 请求", detail, ev_end + f"；{method} {path or '/'}")
             if host:
-                add("info", "目标主机", f"目标主机 {host}。", f"Host: {host}")
+                add("info", "目标主机", f"请求头中的 Host 为 {host}，表示客户端要访问的网站或虚拟主机名；实际 TCP 连接的目的地址是 {dst}。", f"Host: {host}")
         elif status:
             level = "info"
             try:
@@ -621,7 +701,7 @@ def _build_packet_conclusions(
         else:
             add("info", "HTTP 报文", summary or f"这是一条 HTTP 报文，从 {src} 到 {dst}。", ev_end)
         if is_tcp and flag_names:
-            add("info", "TCP 承载", f"承载在 TCP 上，标志为 {'、'.join(flag_names)}，载荷 {plen} 字节。", ev_flags)
+            add("info", "TCP 承载", f"这条 HTTP 报文承载在 TCP 上，从 {src} 发送到 {dst}，TCP 标志为 {'、'.join(flag_names)}，本包载荷 {plen} 字节" + (f"，{ev_seq}" if ev_seq else "") + "。", ev_flags)
 
     elif proto in ("TLS", "SSL") or app.get("tls"):
         tls = app.get("tls") or {}
@@ -639,12 +719,12 @@ def _build_packet_conclusions(
             ev = ev_end + (("；SNI=" + sni) if sni else "；ClientHello")
             add("info", "TLS ClientHello", detail, ev)
             if sni:
-                add("info", "访问主机名", f"客户端在握手中声明要访问的主机名（SNI）是 {sni}。", f"SNI={sni}")
-            add("info", "不解密内容", "只能看到握手明文字段；加密后的应用数据不会被解密。")
+                add("info", "访问主机名", f"客户端在 TLS 握手的 ClientHello 中声明要访问的主机名（SNI）是 {sni}。这只说明准备连接的目标名称，并不等于已经完成握手或已能看到加密后的应用内容。", f"SNI={sni}")
+            add("info", "不解密内容", "本工具只能看到握手阶段的明文字段（例如 SNI、记录类型），不会解密随后的 TLS 应用数据，因此不能从本包还原出网页或接口的具体内容。")
         elif "server hello" in blob:
-            add("info", "TLS ServerHello", f"这是一条 TLS ServerHello，从 {src} 到 {dst}。本工具不解密 TLS 内容。", ev_end)
+            add("info", "TLS ServerHello", f"这是一条 TLS ServerHello，从 {src} 发送到 {dst}，是服务端对 ClientHello 的回应。本工具不解密 TLS 内容，只能看到握手明文中的有限字段。", ev_end)
             if tls.get("version"):
-                add("info", "TLS 版本字段", f"记录或遗留版本字段为 {tls.get('version')}。")
+                add("info", "TLS 版本字段", f"记录层或遗留版本字段显示为 {tls.get('version')}。该字段有时只是兼容用的遗留值，不一定等于最终协商出的 TLS 版本。")
         elif "application data" in ((rec or "") + (view.get("info") or "")).lower():
             add("info", "TLS 应用数据", f"这是一条 TLS 应用数据，从 {src} 到 {dst}。内容已加密，本工具不解密。", ev_end)
         else:
@@ -654,14 +734,17 @@ def _build_packet_conclusions(
     elif is_tcp or proto == "TCP":
         role = _this_packet_role(view, hs, peers)
         ev = "；".join(x for x in (ev_end, ev_flags, ev_seq) if x)
+        base = f"这是一条 TCP 报文，从 {src} 发送到 {dst}"
+        flag_s = ("，标志为 " + "、".join(flag_names)) if flag_names else ""
+        seq_s = ("，" + ev_seq) if ev_seq else ""
         if _has(flags, "RST"):
-            add("warn", "RST 中止连接", role or "这条报文用 RST 中止连接。", ev)
+            add("warn", "RST 中止连接", f"{base}{flag_s}{seq_s}。{role}RST 会立刻中止这条连接，对端通常不再继续发送数据。", ev)
         elif _has(flags, "SYN") and not _has(flags, "ACK"):
-            add("info", "三次握手第 1 拍", role or "这是 TCP 三次握手的第一拍（SYN），用于发起连接。", ev)
+            add("info", "三次握手第 1 拍", f"{base}{flag_s}{seq_s}。{role}这是客户端（或发起方）在请求建立 TCP 连接，此时还没有进入数据传输阶段。", ev)
         elif _has(flags, "SYN") and _has(flags, "ACK"):
-            add("info", "三次握手第 2 拍", role or "这是 TCP 三次握手的第二拍（SYN-ACK），对端同意建立连接。", ev)
+            add("info", "三次握手第 2 拍", f"{base}{flag_s}{seq_s}。{role}对端已经同意建立连接，并回带了对发起方 SYN 的确认，等待第三拍 ACK 后即可传输数据。", ev)
         elif _has(flags, "FIN"):
-            add("info", "连接正在关闭", role or "这是 TCP FIN+ACK，连接正在关闭。", ev)
+            add("info", "连接正在关闭", f"{base}{flag_s}{seq_s}，本包载荷 {plen} 字节。{role}FIN 表示这一方向准备结束发送；连接要等另一方向也关闭（或被 RST）后才完全终止。", ev)
         elif (
             _has(flags, "ACK")
             and not _has(flags, "SYN")
@@ -671,31 +754,68 @@ def _build_packet_conclusions(
             and not _has(flags, "RST")
         ):
             if hs.get("syn") and hs.get("synack") and hs.get("ack_no") == view.get("no"):
-                add("info", "三次握手第 3 拍", role or "这是 TCP 三次握手的第三拍（ACK），连接随后可以传输数据。", ev)
+                add("info", "三次握手第 3 拍", f"{base}{flag_s}{seq_s}。{role}三次握手至此完成，随后这条连接就可以传输应用数据。", ev)
             else:
-                add("info", "纯 ACK", role or "这是一条无载荷的纯 ACK，用于确认对端已收到的数据或控制报文。", ev)
+                add("info", "纯 ACK", f"{base}{flag_s}{seq_s}。{role}本包没有应用载荷，主要用于确认对端已经收到的数据或控制报文，并通告当前接收窗口。", ev)
         elif plen > 0:
-            add("info", "携带有效载荷", role or f"这条报文携带有效载荷，共 {plen} 字节。", ev)
+            detail = f"{base}，携带 {plen} 字节有效载荷{flag_s}{seq_s}。"
+            if _has(flags, "PSH"):
+                detail += "置位了 PSH，表示希望把这些数据尽快交给对端应用层，而不是继续在缓冲里等待。"
+            else:
+                detail += "这些字节是该方向上的应用数据或上层协议数据。"
+            if port_txt:
+                detail += port_txt
+            add("info", "携带有效载荷", detail, ev)
         else:
-            add("info", "TCP 报文", role or summary or f"这是一条 TCP 报文，从 {src} 到 {dst}。", ev)
+            add("info", "TCP 报文", f"{base}{flag_s}{seq_s}。{role or (summary or '')}".strip(), ev)
         if ev_flags:
-            add("info", "TCP 标志", "TCP 标志：" + "、".join(flag_names) + "。", ev_seq or ev_flags)
+            add("info", "TCP 标志", f"这条报文的 TCP 标志为 {'、'.join(flag_names)}" + (f"，{ev_seq}" if ev_seq else "") + "。这些标志用来表示连接控制（如 SYN、ACK、FIN、RST）或数据推送（PSH），需要结合上面的本包结论一起看。", ev_seq or ev_flags)
         if window is not None:
-            add("info", "通告窗口", f"通告窗口为 {window}。")
+            add("info", "通告窗口", f"这条报文通告的 TCP 接收窗口为 {window} 字节，用来告诉对端自己当前还能接收多少数据。" + ("窗口为 0 时，对端通常应暂停发送新数据，直到窗口再次打开。" if window == 0 else ""))
+        if port_txt and plen == 0:
+            add("info", "端口含义", port_txt, ev_end)
         if peers and hs:
             if hs.get("complete"):
-                add("info", "流状态", "同一条流里已能看到完整或已在传输数据的握手过程。")
+                add("info", "流状态", f"在同一条 TCP 流（{src} 与对端 {dst} 之间）里，已经能看到完整的三次握手，或抓包窗口内已经出现数据传输。")
             elif hs.get("syn") and not hs.get("synack"):
-                add("info", "流状态", "同一条流目前只见到 SYN，还没有看到 SYN-ACK。")
+                add("info", "流状态", f"同一条 TCP 流目前只见到 SYN，还没有看到对端的 SYN-ACK。这可能是对端尚未应答，也可能是应答没有被抓到。")
             elif hs.get("syn") and hs.get("synack") and not hs.get("ack"):
-                add("info", "流状态", "同一条流已有 SYN 与 SYN-ACK，尚未看到第三拍 ACK。")
+                add("info", "流状态", f"同一条 TCP 流已有 SYN 与 SYN-ACK，但尚未看到发起方的第三拍 ACK，握手可能仍未完成，或第三拍没有出现在当前抓包范围里。")
 
     elif proto == "UDP":
-        add("info", "UDP 报文", summary or f"这是一条 UDP 报文，从 {src} 到 {dst}，载荷 {plen} 字节。", ev_end)
-        add("info", "已识别到的层次", "已识别到 UDP。若端口不是常见协议，载荷未再往上解析。")
-        sport, dport = view.get("sport"), view.get("dport")
-        if sport not in (53, 5353) and dport not in (53, 5353, 67, 68, 123, 161, 162, 443, 853):
-            add("info", "上层未解析", "其余上层协议未能解析，不假装已分析出应用内容。")
+        sport, dport = _as_port(view.get("sport")), _as_port(view.get("dport"))
+        detail = (
+            f"这是一条 UDP 报文，从 {src} 发送到 {dst}，载荷 {plen} 字节。"
+            "UDP 是无连接传输，没有握手过程，也没有 TCP 那样的标志位或确认号，因此不能用 TCP 的标志或序号规则来分析这条报文。"
+        )
+        if ttl is not None:
+            detail += f" IP TTL / Hop Limit 为 {ttl}。"
+        add("info", "UDP 报文", detail, ev_end)
+        if port_txt:
+            title = "VXLAN 端口" if "VXLAN" in port_txt else "端口含义"
+            add("info", title, port_txt, ev_end)
+        known_app = {53, 5353, 67, 68, 123, 161, 162, 443, 853}
+        if dport == 4789 or sport == 4789 or "VXLAN" in port_txt:
+            add(
+                "info",
+                "上层封装",
+                f"已识别到 {layers_s}。本工具目前尚未继续解析 VXLAN 头中的 VNI 或内层以太网帧，因此不编造隧道内部的主机、网段或原始报文结论。若需要查看内层内容，请结合报文详情中的原始字节做进一步分析。",
+                ev_end,
+            )
+        elif sport not in known_app and dport not in known_app:
+            add(
+                "info",
+                "上层未解析",
+                f"已识别到 {layers_s}。目的端口 {dport if dport is not None else '未知'} 不是本工具当前会继续向上解析的常见应用协议端口，因此不再假装已经分析出应用层内容。",
+                ev_end,
+            )
+        else:
+            add(
+                "info",
+                "已识别到的层次",
+                f"已识别到 {layers_s}。该端口对应的应用协议若未被单独解出，请结合报文详情中的字段查看；未解出的部分不会编造结论。",
+                ev_end,
+            )
 
     else:
         if recognized:
@@ -723,6 +843,9 @@ def _build_packet_conclusions(
         # 纯 ACK / FIN 无载荷已在主结论中说明时不再重复
         if item["title"] in ("纯 ACK", "FIN 无载荷") and item["title"] in existing_titles:
             continue
+        # 非 TCP 报文不得套用 TCP 标志结论
+        if item["title"] == "标志组合异常" and not is_tcp:
+            continue
         if item["detail"] in existing_details:
             continue
         if any(item["detail"] in (c["detail"] or "") or (c["detail"] or "") in item["detail"] for c in out):
@@ -748,15 +871,7 @@ def _build_packet_conclusions(
                 summary or f"这是第 {view.get('no') or '?'} 号报文（{proto}），从 {src} 到 {dst}。",
             )
 
-    # 通常保留 2～5 条，告警优先不被截掉
-    if len(out) > 5:
-        warns = [c for c in out if c["level"] in ("error", "warn")]
-        infos = [c for c in out if c["level"] not in ("error", "warn")]
-        keep = (warns + infos)[:5]
-        # 保持相对原顺序
-        order = {id(c): i for i, c in enumerate(out)}
-        keep.sort(key=lambda c: order.get(id(c), 0))
-        out = keep
+    # 保留全部本包结论，由界面完整展示，不再截成短列表
     return out
 
 
@@ -788,9 +903,7 @@ def analyze_packet(view: dict, *, raw: Any = None, stream: list[dict] | None = N
     flags = int(view.get("tcp_flags") or 0)
     flag_names = _flag_names(flags)
     plen = int(view.get("payload_len") or 0)
-    is_tcp = (view.get("l4") == "TCP") or (view.get("tcp_flags") is not None) or proto in (
-        "TCP", "HTTP", "TLS", "SSL"
-    )
+    is_tcp = _packet_is_tcp(view)
 
     summary = ""
     if proto == "ARP" or app.get("arp"):
@@ -1089,7 +1202,7 @@ def diagnose_capture(views: list[dict], *, filtered: bool = False) -> dict:
             pkts[0].get("l4") or pkts[0].get("protocol") or ""
         )
         if str(proto).upper() in ("TCP", "HTTP", "TLS", "SSL") or any(
-            p.get("tcp_flags") is not None or p.get("l4") == "TCP" for p in pkts
+            _packet_is_tcp(p) for p in pkts
         ):
             tcp_streams.append((key, pkts))
 

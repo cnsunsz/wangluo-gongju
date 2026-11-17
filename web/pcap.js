@@ -25,8 +25,9 @@ window.PANELS = window.PANELS || {};
   let firstTs = 0;
   let cap = null;
   let listAtBottom = true;
-  let splitRatios = [0.36, 0.44, 0.20];
-  let midRatio = 0.56;
+  let listHeight = 280;
+  let treeHeight = 340;
+  let bytesHeight = 240;
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -697,8 +698,8 @@ window.PANELS = window.PANELS || {};
   function conclusionCards(list) {
     return '<ul class="pcap-diag-list pcap-concl-list">' + list.map(c =>
       '<li class="pcap-diag-item ' + esc(c.level || 'info') + '"><b>' + esc(c.title) +
-      '</b><span>' + esc(c.detail) + '</span>' +
-      (c.evidence ? '<small>依据：' + esc(c.evidence) + '</small>' : '') +
+      '</b><span class="pcap-concl-detail">' + esc(c.detail) + '</span>' +
+      (c.evidence ? '<small class="pcap-concl-ev">依据：' + esc(c.evidence) + '</small>' : '') +
       '</li>').join('') + '</ul>';
   }
 
@@ -768,8 +769,8 @@ window.PANELS = window.PANELS || {};
       }
       body.innerHTML = '<ul class="pcap-diag-list">' + list.map(c =>
         '<li class="pcap-diag-item ' + esc(c.level || 'info') + '"><b>' + esc(c.title) +
-        '</b><span>' + esc(c.detail) + '</span>' +
-        (c.evidence ? '<small>依据：' + esc(c.evidence) + '</small>' : '') +
+        '</b><span class="pcap-concl-detail">' + esc(c.detail) + '</span>' +
+        (c.evidence ? '<small class="pcap-concl-ev">依据：' + esc(c.evidence) + '</small>' : '') +
         '</li>').join('') + '</ul>';
     } catch (e) {
       body.innerHTML = '<div class="pcap-empty err">' + esc(e.message || e) + '</div>';
@@ -838,34 +839,34 @@ window.PANELS = window.PANELS || {};
 
   function bindSplitters(root) {
     const list = $id('pcapListPane');
-    const mid = $id('pcapMid');
-    const bytes = $id('pcapBytesPane');
-    const analysis = $id('pcapAnalysisPane');
     const tree = $id('pcapTreePane');
+    const bytes = $id('pcapBytesPane');
     function apply() {
-      const s = splitRatios[0] + splitRatios[1] + splitRatios[2];
-      if (list) list.style.flex = (splitRatios[0] / s) + ' 1 0';
-      if (mid) mid.style.flex = (splitRatios[1] / s) + ' 1 0';
-      if (bytes) bytes.style.flex = (splitRatios[2] / s) + ' 1 0';
-      if (analysis) analysis.style.flex = midRatio + ' 1 0';
-      if (tree) tree.style.flex = (1 - midRatio) + ' 1 0';
+      if (list) {
+        list.style.flex = '0 0 auto';
+        list.style.height = listHeight + 'px';
+      }
+      if (tree) {
+        tree.style.flex = '0 0 auto';
+        tree.style.height = treeHeight + 'px';
+      }
+      if (bytes) {
+        bytes.style.flex = '0 0 auto';
+        bytes.style.height = bytesHeight + 'px';
+      }
     }
     apply();
     root.querySelectorAll('.pcap-split-h').forEach(h => {
       h.addEventListener('mousedown', ev => {
         ev.preventDefault();
-        const idx = Number(h.dataset.split) || 1;
+        const target = h.dataset.split || '';
         const startY = ev.clientY;
-        const start = splitRatios.slice();
-        const total = (root.querySelector('.pcap-panes') || {}).clientHeight || 1;
+        const startH = target === 'list' ? listHeight : (target === 'tree' ? treeHeight : bytesHeight);
         function move(e) {
-          const dy = e.clientY - startY;
-          const df = dy / total;
-          const a = start[idx - 1] + df;
-          const b = start[idx] - df;
-          if (a < 0.20 || b < 0.20) return;
-          splitRatios[idx - 1] = a;
-          splitRatios[idx] = b;
+          const next = Math.max(160, Math.min(900, startH + (e.clientY - startY)));
+          if (target === 'list') listHeight = next;
+          else if (target === 'tree') treeHeight = next;
+          else bytesHeight = next;
           apply();
         }
         function up() {
@@ -876,32 +877,6 @@ window.PANELS = window.PANELS || {};
         document.addEventListener('mouseup', up);
       });
     });
-    const v = root.querySelector('.pcap-split-v');
-    if (v) {
-      v.addEventListener('mousedown', ev => {
-        ev.preventDefault();
-        const midEl = $id('pcapMid');
-        if (!midEl) return;
-        const stacked = getComputedStyle(midEl).flexDirection === 'column';
-        const startPos = stacked ? ev.clientY : ev.clientX;
-        const start = midRatio;
-        const total = stacked ? (midEl.clientHeight || 1) : (midEl.clientWidth || 1);
-        function move(e) {
-          const d = ((stacked ? e.clientY : e.clientX) - startPos) / total;
-          let next = start + d;
-          if (next < 0.28) next = 0.28;
-          if (next > 0.72) next = 0.72;
-          midRatio = next;
-          apply();
-        }
-        function up() {
-          document.removeEventListener('mousemove', move);
-          document.removeEventListener('mouseup', up);
-        }
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
-      });
-    }
   }
 
   function mount(panel) {
@@ -942,7 +917,7 @@ window.PANELS = window.PANELS || {};
           <span id="pcapCount">0 包</span>
           <span class="pcap-status" id="pcapStatus">就绪（不会自动开始抓包）</span>
         </div>
-        <div class="pcap-panes">
+        <div class="pcap-panes pcap-panes-long">
           <div class="pcap-pane pcap-list-pane" id="pcapListPane">
             <div class="pcap-list-head">
               <span class="c-no">序号</span><span class="c-time">时间</span><span class="c-src">源地址</span>
@@ -954,28 +929,28 @@ window.PANELS = window.PANELS || {};
               <div id="pcapListRows" class="pcap-list-rows"></div>
             </div>
           </div>
-          <div class="pcap-split pcap-split-h" data-split="1" title="拖动调整高度"></div>
-          <div class="pcap-mid" id="pcapMid">
+          <div class="pcap-split pcap-split-h" data-split="list" title="拖动调整报文列表高度"></div>
             <div class="pcap-pane pcap-analysis-pane" id="pcapAnalysisPane">
               <div class="pcap-pane-label">报文分析</div>
               <div class="pcap-analysis" id="pcapAnalysis">
                 <section class="pcap-pkt-ana" id="pcapPktAnaSection">
-                  <h3>分析结论</h3>
+                  <h3>本包分析结论</h3>
                   <div id="pcapPktAnaBody"><div class="pcap-empty">打开或抓取报文后，将自动选中第一条并给出分析结论</div></div>
                 </section>
                 <section class="pcap-diag" id="pcapDiagSection">
-                  <h3>整次抓包结论</h3>
-                  <div id="pcapDiagBody"><div class="pcap-empty">打开或抓取报文后，将在此给出整次抓包的结论</div></div>
+                  <details class="pcap-diag-fold" id="pcapDiagFold">
+                    <summary>整次抓包结论</summary>
+                    <div id="pcapDiagBody"><div class="pcap-empty">打开或抓取报文后，将在此给出整次抓包的结论</div></div>
+                  </details>
                 </section>
               </div>
             </div>
-            <div class="pcap-split pcap-split-v" data-split="mid" title="拖动调整宽度"></div>
+            <div class="pcap-split pcap-split-h" data-split="tree" title="拖动调整报文详情高度"></div>
             <div class="pcap-pane pcap-tree-pane" id="pcapTreePane">
               <div class="pcap-pane-label">报文详情</div>
               <div class="pcap-tree" id="pcapTree"><div class="pcap-empty">选择一条报文，查看逐层字段</div></div>
             </div>
-          </div>
-          <div class="pcap-split pcap-split-h" data-split="2" title="拖动调整高度"></div>
+          <div class="pcap-split pcap-split-h" data-split="bytes" title="拖动调整报文字节高度"></div>
           <div class="pcap-pane pcap-bytes-pane" id="pcapBytesPane">
             <div class="pcap-pane-label">报文字节</div>
             <div class="pcap-bytes" id="pcapBytes"><div class="pcap-empty">选择一条报文以查看原始字节</div></div>

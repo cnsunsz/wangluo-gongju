@@ -5,7 +5,7 @@ import os
 import sys
 
 APP_NAME = "网络工具"
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 APP_AUTHOR = "Lorenzo"
 APP_DESCRIPTION = "网络工具"
 LEGACY_APP_NAME = "网络万用表"
