@@ -55,11 +55,12 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
 <body>
 <header>
   <div class="wrap">
-    <h1>网络工具 <span class="tag">Windows 版 1.1</span></h1>
-    <p class="sub">41 个网络工具，独立桌面窗口运行；关闭窗口即退出。免安装、免管理员权限，数据只保存在本机。</p>
+    <h1>网络工具 <span class="tag">Windows 版 1.2.0</span></h1>
+    <p class="sub">47 个网络工具，独立桌面窗口运行。关闭窗口会隐藏到托盘并保持运行；网页在软件内打开。免安装、免管理员权限，数据只保存在本机。</p>
     <p class="author">作者：Lorenzo</p>
     <nav>
       <a href="#start">快速开始</a>
+      <a href="#v120">1.2.0 变化</a>
       <a href="#ai">AI 分析</a>
       <a href="#tools">功能清单</a>
       <a href="#cases">排查场景</a>
@@ -73,11 +74,24 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   <h2 id="start">快速开始</h2>
   <div class="steps">
     <div class="step"><b><i>1</i>双击程序</b><span>直接运行「网络工具.exe」（或源码下的 <code>python app.py</code>），会打开独立桌面窗口，不再依赖系统浏览器。</span></div>
-    <div class="step"><b><i>2</i>关闭即退出</b><span>默认关闭窗口就会停止服务并结束进程，不会残留后台。可在「设置」中改为最小化到托盘或关闭后保留后台。</span></div>
+    <div class="step"><b><i>2</i>关闭留在托盘</b><span>关闭窗口会隐藏到托盘并保持运行。「最小化运行」默认开启。彻底退出请用托盘「退出」或「设置 → 退出程序」。</span></div>
     <div class="step"><b><i>3</i>选工具运行</b><span>点九宫格进入工具，填参数后点「开始」；实时输出可随时「停止」。</span></div>
     <div class="step"><b><i>4</i>复位与导出</b><span>「清空」复位结果；「导出」把参数、指标、表格、日志、二维码保存为 HTML 报告。</span></div>
   </div>
-  <p class="note">服务只监听 127.0.0.1，不对局域网开放。运行日志与配置在 <code>%LOCALAPPDATA%\网络工具\</code>，不会在程序旁边创建 data 文件夹。托盘菜单可「打开窗口」或「退出」（退出会彻底结束进程）。</p>
+  <p class="note">服务只监听 127.0.0.1，不对局域网开放。运行日志与配置在 <code>%LOCALAPPDATA%\网络工具\</code>，不会在程序旁边创建 data 文件夹。托盘菜单可「打开窗口」或「退出」（退出会彻底结束进程）。需要打开的外部网页（例如三网拨测）会在软件内弹出子窗口，不会跳到系统浏览器。</p>
+
+  <h2 id="v120">1.2.0 有什么变化</h2>
+  <ul class="limit">
+    <li><b>最小化运行默认开启</b>：最小化时隐藏到托盘，可在「设置」中关闭。</li>
+    <li><b>关闭窗口默认留在后台</b>：不再提供「保留后台运行」开关。关闭窗口一定隐藏到托盘并保持运行；只有托盘「退出」或设置里的「退出程序」才会结束进程。读取旧版 settings.json 时也会按这个行为执行。</li>
+    <li><b>开机自启</b>：若同时开启了「最小化运行」，登录 Windows 后会先进入托盘。</li>
+    <li><b>网页在软件内打开</b>：例如「三网拨测」会新开一个软件内窗口访问阿里云拨测页（该页禁止 iframe，所以不用嵌入），关闭子窗口不影响主程序。主窗口仍是本机界面，不会被导航到外部站点。</li>
+    <li><b>已删除「分享软件」</b>：原先置灰的手机端入口已去掉。</li>
+    <li><b>网卡叠加</b>：连接级多网卡聚合。选择多张网卡后启动本机 HTTP / SOCKS5 代理，每条新连接绑定到一张网卡。可选接管当前用户系统代理；停止或退出时恢复。适合多连接下载，不能把单条 TCP 测速变成多条链路之和。</li>
+    <li><b>服务器信息提取</b>：把告警 / CMDB 原文解析成主机名、SN、管理 IP、BMC、型号、机房、故障，并生成「【合营云】区域Server业务主机名硬件故障」标题，支持一键复制。用粘贴或读剪贴板，没有「从当前浏览器页提取」。</li>
+    <li><b>SSH</b>：软件内终端。可保存 / 编辑 / 删除常用主机（名称、地址、端口、用户名）。密码默认不保存；「记住密码」用当前 Windows 用户 DPAPI 加密后存在本机配置目录，默认关闭。私钥只引用本机路径。</li>
+    <li><b>其它新工具</b>：路由表、ARP 表、网卡流量、NAT 类型检测。</li>
+  </ul>
 
   <h2 id="ai">AI 分析（可选）</h2>
   <p class="note">任意工具跑完后，点「AI分析」，会把当前工具的参数、指标、表格和日志发给已配置的大模型，返回【结论】【依据】【建议】。点右上角「AI 设置」配置接口。</p>
@@ -89,7 +103,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   </ul>
 
   <h2 id="tools">功能清单</h2>
-  <p class="note">共 41 项，40 项可用（「WLAN 分析」仅笔记本显示）；<span class="need">需联网</span> 表示依赖外部接口或目标站点。标「PC 不适用」的一项为手机端功能。每项运行结果都可点「导出」保存为自包含 HTML（参数、指标、表格、日志、二维码）。</p>
+  <p class="note">共 47 项（「WLAN 分析」仅笔记本显示）；<span class="need">需联网</span> 表示依赖外部接口或目标站点。每项运行结果都可点「导出」保存为自包含 HTML（参数、指标、表格、日志、二维码）。</p>
 
   <h3>检测类 <span class="chip red">红色分组</span></h3>
   <table>
@@ -109,7 +123,9 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
       <tr><td>网络诊断</td><td>全链路体检</td><td>域名或网页地址</td><td><b>设备信息（含公网 IP 与归属地来源）→ 联网状态 → DNS 结果 → 系统代理 / 防火墙 / 时间偏差 → TCP 四次连接 → 网页分析 → traceroute</b> 流式输出；网页分析含 DNS/建连/SSL/首包/下载分阶段耗时、状态码、重定向链、证书有效期与慢点结论；可点「导出配置包」生成 ipconfig/路由/ARP/netstat/代理/防火墙 txt</td></tr>
       <tr><td>Windows 诊断</td><td>系统常见故障体检（8 类）</td><td>全部或指定一类；可选 AI 关注问题</td><td>启动/自启与快速启动、蓝屏事件与转储、CPU/内存/磁盘、更新挂起与错误、网卡/音频/蓝牙/打印、资源管理器与商店、激活/BitLocker/磁盘空间、时间同步与 WHEA</td></tr>
       <tr><td>站点对比</td><td>多站点耗时 / 状态对比</td><td>最多 20 个 URL；完整分段或只查状态</td><td>状态码、DNS / TCP / TLS / 首字节 / 总计</td></tr>
-      <tr><td>三网拨测</td><td>阿里云全国节点 HTTP 拨测（电信/联通/移动）</td><td>域名或 URL</td><td>独立窗口打开阿里云拨测并自动复制域名；查看三网各省市状态码、分段耗时、解析 IP，支持阿里云页面导出报表 <span class="need">需联网</span></td></tr>
+      <tr><td>三网拨测</td><td>阿里云全国节点 HTTP 拨测（电信/联通/移动）</td><td>域名或 URL</td><td>在软件内新开窗口打开阿里云拨测（不跳系统浏览器）并自动复制域名；查看三网各省市状态码、分段耗时、解析 IP，支持阿里云页面导出报表 <span class="need">需联网</span></td></tr>
+      <tr><td>网卡流量</td><td>各网卡实时上下行</td><td>时长（0 为持续）</td><td>每秒刷新各网卡下行 / 上行速率与累计流量</td></tr>
+      <tr><td>NAT 类型</td><td>STUN 检测 NAT 类型</td><td>无需输入</td><td>公网 / 锥型 / 对称型等；部分公用 STUN 不支持 CHANGE-REQUEST 时会如实说明，无法进一步细分锥型 <span class="need">需联网（UDP）</span></td></tr>
       <tr><td>批量任务</td><td>批量 Ping 或批量端口检查</td><td>最多 30 个主机</td><td>逐主机结果表</td></tr>
       <tr><td>MTU测试</td><td>路径 MTU / 分片探测</td><td>目标、IPv4/IPv6</td><td>二分探测最大不分片载荷，自动换算 MTU</td></tr>
       <tr><td>端口占用</td><td>本机监听与连接</td><td>全部/仅监听、关键字</td><td>协议、本地/远端、状态、PID、进程名</td></tr>
@@ -119,7 +135,6 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
       <tr><td>HTTP速度</td><td>分段计时定位慢在哪</td><td>URL</td><td>DNS → TCP → TLS → 首字节 → 总计（ms）</td></tr>
       <tr><td>测速</td><td>延时 / 下行 / 上行</td><td>下载与上传地址</td><td>延时、抖动、上下行 Mbps <span class="need">需联网</span></td></tr>
       <tr><td>域名解析</td><td>常用记录查询</td><td>域名、记录类型、指定 DNS</td><td>A / AAAA / CNAME / MX / TXT / NS</td></tr>
-      <tr><td>分享软件</td><td>手机端分享入口</td><td>—</td><td>PC 端不适用（置灰）</td></tr>
     </tbody>
   </table>
 
@@ -140,6 +155,9 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
       <tr><td>进制转换</td><td>2–36 进制互转</td><td>数值、原进制、目标进制</td><td>目标值 + 二/八/十/十六进制对照</td></tr>
       <tr><td>User Agent</td><td>UA 解析</td><td>UA 文本（留空取本机）</td><td>浏览器、版本、系统、内核、设备类型</td></tr>
       <tr><td>二维码生成</td><td>文本/链接转二维码</td><td>内容、尺寸</td><td>PNG 图片，可直接右键保存</td></tr>
+      <tr><td>路由表</td><td>查看本机路由</td><td>全部 / 仅 IPv4 / 仅 IPv6</td><td>目标、网关、接口、度量、协议</td></tr>
+      <tr><td>ARP 表</td><td>邻居缓存</td><td>可选关键字</td><td>IP、MAC、网卡、状态</td></tr>
+      <tr><td>服务器信息提取</td><td>告警 / CMDB 原文解析为工单信息</td><td>粘贴或读取剪贴板</td><td>识别主机名、物理机 SN、管理 IP、BMC IP、型号、机房、故障与区域；生成「【合营云】区域Server业务主机名硬件故障」标题与七行模板，可一键复制。已是标准模板再解析会原样保留。WebView 若无法读剪贴板，请在原文框 Ctrl+V</td></tr>
     </tbody>
   </table>
 
@@ -149,7 +167,9 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <tbody>
       <tr><td>HTTP高级方法</td><td>自定义请求</td><td>方法、URL、请求头、请求体</td><td>状态、耗时、响应头、正文</td></tr>
       <tr><td>唤醒</td><td>Wake-on-LAN</td><td>MAC、广播地址、端口</td><td>发送 102 字节魔术包；需同广播域且目标已开启 WOL</td></tr>
-      <tr><td>iperf3</td><td>吞吐测试</td><td>服务端地址、端口、时长、方向</td><td>内置 iperf3 3.22（<code>bin/</code>），需可达的 iperf3 服务端</td></tr>
+      <tr><td>iperf3</td><td>吞吐测试</td><td>服务端地址、端口、时长、方向</td><td>内置 iperf3（<code>bin/</code>），需可达的 iperf3 服务端</td></tr>
+      <tr><td>网卡叠加</td><td>连接级多网卡聚合</td><td>勾选网卡、轮询或按权重、是否接管系统代理</td><td>启动后在本机提供 HTTP 与 SOCKS5 代理，每条新 TCP 绑定到一张已选网卡（源地址 + IP_UNICAST_IF）。可接管当前用户系统代理，停止 / 退出时恢复。不拆单条连接，不是 L2 bonding，也不能让单连接测速等于多条网络之和。同一路由器下的有线+Wi-Fi 仍共享出口带宽。只有走系统代理或手动填写本地代理的应用会分流</td></tr>
+      <tr><td>SSH</td><td>远程终端</td><td>主机、端口、用户名、密码或私钥路径</td><td>软件内 xterm 终端。可保存 / 编辑 / 删除常用主机（名称、地址、端口、用户名）。密码默认不保存；勾选「记住密码」后用 DPAPI 加密存在本机。私钥只保存本机路径。列表在 <code>%LOCALAPPDATA%\网络工具\config\ssh_hosts.json</code></td></tr>
     </tbody>
   </table>
 
@@ -187,6 +207,20 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
   <div class="scene"><b>报障 / 工单取证</b>
     <ol>
       <li>「网络诊断」跑完后点「导出配置包」，一键生成 txt（含 ipconfig、路由、ARP、netstat、代理、防火墙）并下载。</li>
+      <li>合营云硬件故障工单：把告警或 CMDB 原文贴进「服务器信息提取」，生成标题和七行模板后一键复制。</li>
+    </ol>
+  </div>
+  <div class="scene"><b>想把有线和 Wi-Fi 一起给下载器用</b>
+    <ol>
+      <li>打开「网卡叠加」，勾选要参与的网卡，建议开启「接管 Windows 系统代理」，再点「启动聚合」。</li>
+      <li>用浏览器或多连接下载工具测试。单线程测速通常不会明显变快，这是正常现象。</li>
+      <li>用完后点「停止聚合」，系统代理会恢复。</li>
+    </ol>
+  </div>
+  <div class="scene"><b>连到服务器里操作</b>
+    <ol>
+      <li>打开「SSH」，填写地址、端口、用户名和密码（或私钥路径）后点「连接」。</li>
+      <li>需要下次再用时，先改好备注名，点「保存主机」。之后可在列表里「填入并连接」。</li>
     </ol>
   </div>
 
@@ -195,14 +229,14 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <thead><tr><th>路径</th><th>说明</th></tr></thead>
     <tbody>
       <tr><td>网络工具.exe</td><td>打包后的单一可执行文件（无控制台、无 _internal、无旁边的 data 目录）</td></tr>
-      <tr><td>%LOCALAPPDATA%\网络工具\</td><td>唯一运行目录：日志、单实例锁、url/pid、<code>config\ai.json</code>、<code>settings.json</code>、诊断报告。不会在 exe 旁创建 data 文件夹</td></tr>
+      <tr><td>%LOCALAPPDATA%\网络工具\</td><td>唯一运行目录：日志、单实例锁、url/pid、<code>settings.json</code>、<code>config\ai.json</code>、<code>config\ssh_hosts.json</code>（SSH 主机，密码若选择记住则 DPAPI 加密）、诊断报告、网卡叠加异常退出时的代理备份。不会在 exe 旁创建 data 文件夹</td></tr>
       <tr><td>app.py</td><td>桌面窗口 + Flask 本地服务（仅监听 127.0.0.1）</td></tr>
       <tr><td>core/</td><td>Ping、路由追踪、端口、HTTP、DNS、本机信息、诊断包等实现</td></tr>
       <tr><td>web/</td><td>首页、工具页、样式与脚本；<code>help.html</code> 即本说明</td></tr>
       <tr><td>icons/</td><td>程序图标（多尺寸 ICO）</td></tr>
       <tr><td>bin/</td><td>可选：放入 <code>iperf3.exe</code> 与 <code>cygwin1.dll</code> 后重新打包即可内置测速</td></tr>
       <tr><td>reports/</td><td>「网络诊断 → 导出配置包」生成的 txt 报告，位于运行目录下，UTF-8 BOM</td></tr>
-      <tr><td>requirements.txt</td><td>flask / pywebview / pystray / requests / dnspython / qrcode / pillow / pywin32</td></tr>
+      <tr><td>requirements.txt</td><td>flask / pywebview / pystray / requests / dnspython / qrcode / pillow / pywin32 / paramiko / cryptography</td></tr>
     </tbody>
   </table>
 
@@ -214,17 +248,18 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:16px;font-si
     <li>IPv6 需要本机与出口都支持；不支持时显示「不支持 IPv6 或超时」。</li>
     <li>iperf3 需要可访问的 iperf3 服务端；公网 5201 端口常被网络策略阻断，优先用内网服务端。</li>
     <li>「扫描局域网」会过滤代理 ARP、组播和占位 MAC；跨网段设备不会被发现。</li>
-    <li>「分享软件」为手机端功能，PC 端不提供。</li>
+    <li>「网卡叠加」是连接级分配，不是虚拟网卡 / TUN，也不是真正的链路聚合；同一出口下的多张网卡无法把单连接带宽叠加。</li>
+    <li>「SSH」首次连接会自动接受主机密钥（保存在本机配置目录）。记住密码仅当前 Windows 用户可解密，仍请避免在公用电脑上勾选。</li>
     <li>诊断包会包含本机网络配置（IP、MAC、路由、连接列表），外发前请确认是否符合内部数据规范。</li>
   </ul>
 
   <h2 id="tech">技术说明</h2>
-  <p class="note">Python 3.13 / Flask 本地服务 + pywebview 桌面窗口；长任务用 SSE 流式推送。默认关闭窗口即退出；可在设置中开启最小化到托盘、开机自启或保留后台运行。</p>
+  <p class="note">Python 3.13 / Flask 本地服务 + pywebview 桌面窗口；长任务用 SSE 流式推送。关闭窗口会隐藏到托盘并保持运行；「最小化运行」默认开启，可在设置中关闭。外部网页在软件内的子窗口打开。</p>
   <p class="note">在 Windows 上打包为单个 exe：</p>
   <pre><code>powershell -ExecutionPolicy Bypass -File build.ps1</code></pre>
   <p class="note">iperf3 会依次在 PATH、程序目录、<code>_MEIPASS</code> 中查找 <code>bin/iperf3.exe</code>。旧版若在 exe 旁残留 data 目录，首次启动会把 ai.json 和日志迁移到 LocalAppData。</p>
 
-  <footer>网络工具 Windows 版 · 功能说明 · 作者：Lorenzo · 2026-11-16</footer>
+  <footer>网络工具 Windows 版 1.2.0 · 功能说明 · 作者：Lorenzo · 2026-11-17</footer>
 </main>
 </body>
 </html>

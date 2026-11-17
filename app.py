@@ -1,7 +1,8 @@
 """网络工具 — Windows 桌面版入口。
 
-默认用 pywebview 打开独立窗口；关闭窗口即停止 Flask、杀掉子进程并退出。
-仅当用户在设置中开启「保留后台运行」时，关闭窗口才会隐藏到托盘。
+默认用 pywebview 打开独立窗口。关闭窗口会隐藏到托盘并保持运行；
+只有托盘「退出」或设置里的「退出程序」才会彻底结束进程。
+「最小化运行」默认开启。需要打开的网页在软件内的子窗口访问，不跳系统浏览器。
 运行时文件位于 %LOCALAPPDATA%\\网络工具\\，不会在 exe 旁创建 data 目录。
 """
 from __future__ import annotations
@@ -19,8 +20,8 @@ import time
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 
 from core import (
-    ai, cndns, dns_tools, http_tools, inspect_tools, local_tools,
-    net_extra, nettools, ping, scan, trace, win_diag,
+    ai, browse, cndns, dns_tools, http_tools, inspect_tools, local_inspect, local_tools,
+    mux, net_extra, nettools, ping, scan, ssh_tool, trace, win_diag,
 )
 from core import procs, settings as app_settings
 from core.paths import APP_NAME, APP_VERSION, exe_dir, icon_path, is_frozen, resource_dir, runtime_dir
@@ -302,6 +303,14 @@ def _full_exit(code=0):
     if _shutting_down.is_set():
         return
     _shutting_down.set()
+    try:
+        mux.shutdown_cleanup()
+    except Exception:
+        pass
+    try:
+        ssh_tool.close_all()
+    except Exception:
+        pass
     try:
         procs.kill_all()
     except Exception:
@@ -805,6 +814,216 @@ def api_report():
         return _json_exc(e)
 
 
+@app.post("/api/routes")
+@app.get("/api/routes")
+def api_routes():
+    try:
+        d = request.get_json(silent=True) or {}
+        family = d.get("family") or _arg("family", "all")
+        return _json_ok(local_inspect.route_table(family))
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.post("/api/arp")
+def api_arp():
+    try:
+        d = request.get_json(silent=True) or {}
+        return _json_ok(local_inspect.arp_table(d.get("query", "")))
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.get("/api/ifstat/stream")
+def api_ifstat():
+    return sse(local_inspect.ifstat_stream(_arg("seconds", "0")))
+
+
+@app.post("/api/nat")
+def api_nat():
+    try:
+        return _json_ok(local_inspect.nat_detect())
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.get("/api/mux/adapters")
+def api_mux_adapters():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, adapters=mux.list_adapters())
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.get("/api/mux/status")
+def api_mux_status():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    return jsonify(ok=True, **mux.status())
+
+
+@app.post("/api/mux/start")
+def api_mux_start():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        adapters = d.get("adapters") or d.get("interfaces") or []
+        st = mux.start(
+            adapters,
+            strategy=d.get("strategy") or "rr",
+            system_proxy=bool(d.get("system_proxy", True)),
+            http_port=d.get("http_port"),
+            socks_port=d.get("socks_port"),
+        )
+        return jsonify(ok=True, **st)
+    except (ValueError, RuntimeError) as e:
+        return _json_err(e)
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.post("/api/mux/stop")
+def api_mux_stop():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        return jsonify(ok=True, **mux.stop())
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.post("/api/mux/config")
+def api_mux_config():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        return jsonify(ok=True, **mux.update_config(d.get("strategy"), d.get("weights")))
+    except (ValueError, RuntimeError) as e:
+        return _json_err(e)
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.get("/api/ssh/hosts")
+def api_ssh_hosts():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    return jsonify(ok=True, hosts=ssh_tool.list_hosts())
+
+
+@app.post("/api/ssh/hosts")
+def api_ssh_hosts_save():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        return jsonify(ok=True, host=ssh_tool.save_host(d))
+    except ValueError as e:
+        return _json_err(e)
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.post("/api/ssh/hosts/delete")
+def api_ssh_hosts_delete():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        ssh_tool.delete_host(d.get("id"))
+        return jsonify(ok=True, hosts=ssh_tool.list_hosts())
+    except ValueError as e:
+        return _json_err(e)
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.get("/api/ssh/hosts/<hid>")
+def api_ssh_host_get(hid):
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    row = ssh_tool.get_host(hid, include_secret=True)
+    if not row:
+        return jsonify(ok=False, error="未找到该主机"), 404
+    return jsonify(ok=True, host=row)
+
+
+@app.post("/api/ssh/open")
+def api_ssh_open():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        return jsonify(ok=True, **ssh_tool.open_session(d))
+    except (ValueError, RuntimeError) as e:
+        return _json_err(e)
+    except Exception as e:
+        # paramiko 认证失败等
+        return _json_err(e, 400)
+
+
+@app.get("/api/ssh/stream")
+def api_ssh_stream():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    return sse(ssh_tool.event_stream(_arg("sid", "")))
+
+
+@app.post("/api/ssh/write")
+def api_ssh_write():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        data = d.get("data")
+        if d.get("b64"):
+            import base64
+            data = base64.b64decode(d["b64"])
+        ssh_tool.write_session(d.get("sid"), data or "")
+        return jsonify(ok=True)
+    except (ValueError, RuntimeError) as e:
+        return _json_err(e)
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.post("/api/ssh/resize")
+def api_ssh_resize():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    try:
+        d = request.get_json(silent=True) or {}
+        ssh_tool.resize_session(d.get("sid"), d.get("cols") or 120, d.get("rows") or 32)
+        return jsonify(ok=True)
+    except (ValueError, RuntimeError) as e:
+        return _json_err(e)
+    except Exception as e:
+        return _json_exc(e)
+
+
+@app.post("/api/ssh/close")
+def api_ssh_close():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    d = request.get_json(silent=True) or {}
+    ssh_tool.close_session(d.get("sid") or "")
+    return jsonify(ok=True)
+
+
+@app.post("/api/open_url")
+def api_open_url():
+    if not _is_local():
+        return jsonify(ok=False, error="forbidden"), 403
+    d = request.get_json(silent=True) or {}
+    result = browse.open_browser_window(d.get("url") or "", d.get("title") or "")
+    status = 200 if result.get("ok") else 400
+    return jsonify(**result), status
+
+
 def _is_local():
     return request.remote_addr in ("127.0.0.1", "::1")
 
@@ -893,21 +1112,17 @@ def hide_window():
 
 
 def _on_closing():
-    cfg = app_settings.load()
-    if cfg.get("keep_background") and not _shutting_down.is_set():
-        _ensure_tray()
-        hide_window()
-        return False
-    # 默认：关闭窗口即完全退出
-    threading.Thread(target=lambda: (time.sleep(0.05), _full_exit(0)), daemon=True).start()
-    return True
+    if _shutting_down.is_set():
+        return True
+    _ensure_tray()
+    hide_window()
+    return False
 
 
 def _on_closed():
-    cfg = app_settings.load()
-    if cfg.get("keep_background") and not _shutting_down.is_set():
+    # 关闭窗口只是隐藏；进程在托盘退出或 _full_exit 时结束
+    if _shutting_down.is_set():
         return
-    _full_exit(0)
 
 
 def _on_minimized():
@@ -929,12 +1144,8 @@ def _stop_tray():
 
 
 def _sync_tray():
-    """仅在开启最小化到托盘或保留后台时显示托盘图标。"""
-    cfg = app_settings.load()
-    if cfg.get("keep_background") or cfg.get("minimize_to_tray"):
-        _ensure_tray()
-    else:
-        _stop_tray()
+    """关闭窗口会留在后台，因此始终显示托盘图标（用于打开窗口或退出）。"""
+    _ensure_tray()
 
 
 def _ensure_tray():
@@ -1002,7 +1213,7 @@ def main():
     ]
     if port != want:
         banner.append(f"  提示: 端口 {want} 被占用，已改用 {port}")
-    banner.append("  关闭窗口即停止服务；可在设置中改为托盘后台")
+    banner.append("  关闭窗口会隐藏到托盘并保持运行；托盘「退出」可结束进程")
     banner.append("")
     print("\n".join(banner), flush=True)
 
@@ -1015,8 +1226,14 @@ def main():
         except OSError:
             time.sleep(0.1)
 
+    try:
+        mux.restore_proxy_if_dirty()
+    except Exception:
+        pass
+
     cfg = app_settings.load()
-    hidden = startup and (cfg.get("keep_background") or cfg.get("minimize_to_tray"))
+    # 开机自启时，仅当开启了「最小化运行」才先进入托盘
+    hidden = startup and bool(cfg.get("minimize_to_tray"))
     no_window = os.environ.get("NETMETER_NO_WINDOW") or os.environ.get("NETMETER_HEADLESS")
 
     if no_window:
@@ -1040,19 +1257,33 @@ def main():
         return
 
     global _window
+    browse.set_local_port(port)
+    browse.configure_settings(webview)
+    try:
+        from webview.platforms import edgechromium  # noqa: F401
+    except Exception:
+        pass
+    browse.patch_edge_new_window()
+
     ico = icon_path()
+    js_api = browse.JsBridge()
     kwargs = dict(title=APP_NAME, url=url, width=1280, height=860, min_size=(960, 640),
-                  confirm_close=False, text_select=True)
+                  confirm_close=False, text_select=True, js_api=js_api)
     # hidden / icon 兼容不同 pywebview 版本
     try:
         _window = webview.create_window(hidden=hidden, **kwargs)
     except TypeError:
-        _window = webview.create_window(**kwargs)
+        kwargs.pop("js_api", None)
+        try:
+            _window = webview.create_window(js_api=js_api, **kwargs)
+        except TypeError:
+            _window = webview.create_window(**kwargs)
         if hidden:
             try:
                 _window.hidden = True
             except Exception:
                 pass
+    browse.set_main_window(_window)
 
     try:
         _window.events.closing += _on_closing
@@ -1072,19 +1303,37 @@ def main():
 
     _sync_tray()
 
+    def _on_gui_ready():
+        browse.patch_edge_new_window()
+        browse.guard_main_navigation(_window)
+        _sync_tray()
+
     start_kwargs = {"debug": False}
     gui = os.environ.get("NETMETER_GUI", "edgechromium")
-    try:
-        webview.start(gui=gui, icon=ico, **start_kwargs)
-    except TypeError:
+    started = False
+    for attempt in (
+        lambda: webview.start(_on_gui_ready, gui=gui, icon=ico, **start_kwargs),
+        lambda: webview.start(_on_gui_ready, gui=gui, **start_kwargs),
+        lambda: webview.start(_on_gui_ready, **start_kwargs),
+        lambda: webview.start(gui=gui, **start_kwargs),
+        lambda: webview.start(**start_kwargs),
+    ):
         try:
-            webview.start(gui=gui, **start_kwargs)
+            attempt()
+            started = True
+            break
+        except TypeError:
+            continue
         except Exception:
-            webview.start(**start_kwargs)
+            if started:
+                raise
+            continue
+    if not started:
+        webview.start()
 
-    # start() 返回通常表示窗口循环已结束。
-    # 若用户开启了「保留后台运行」，尽量保持 Flask + 托盘，避免误退出。
-    if app_settings.load().get("keep_background") and not _shutting_down.is_set():
+    # start() 返回通常表示所有窗口已关闭。关闭主窗口只会隐藏，
+    # 但仍可能因异常导致循环结束，此时保持 Flask + 托盘。
+    if not _shutting_down.is_set():
         _ensure_tray()
         try:
             while not _shutting_down.is_set():

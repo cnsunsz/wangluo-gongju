@@ -6,6 +6,7 @@
 <title>网络工具</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="vendor/xterm.css">
 </head>
 <body>
 <header class="topbar">
@@ -39,6 +40,7 @@
   </div>
   <div class="tool-body">
     <form class="panel" id="toolForm" autocomplete="off"></form>
+    <div class="custom-panel" id="customPanel" hidden></div>
     <div class="note-card" id="noteCard" hidden></div>
     <div class="run-bar">
       <button class="btn primary" id="runBtn" type="button">开始</button>
@@ -112,20 +114,15 @@
         <input type="checkbox" id="setAutostart">
         <span>
           <b>开机自启</b>
-          <small>登录 Windows 后自动启动。若同时开启了「最小化运行」或「保留后台运行」，启动时会先进入托盘。</small>
+          <small>登录 Windows 后自动启动。若已开启「最小化运行」，开机后会先进入托盘。</small>
         </span>
       </label>
-      <label class="switch-row">
-        <input type="checkbox" id="setBackground">
-        <span>
-          <b>保留后台运行</b>
-          <small>关闭窗口时隐藏到托盘并保持服务运行，而不是退出。默认关闭：关闭窗口即完全退出，不会残留进程。</small>
-        </span>
-      </label>
+      <p class="modal-note">关闭窗口会隐藏到托盘并保持运行，不会退出。只有托盘菜单「退出」或下方「退出程序」才会彻底结束进程。</p>
       <p class="modal-note" id="settingsPath">配置与日志保存在本机 LocalAppData，不会在程序目录创建 data 文件夹。</p>
       <div class="modal-msg" id="settingsMsg"></div>
     </div>
     <div class="modal-foot">
+      <button class="btn ghost" id="settingsExit" type="button">退出程序</button>
       <button class="btn ghost" id="settingsCancel" type="button">取消</button>
       <button class="btn primary" id="settingsSave" type="button">保存</button>
     </div>
@@ -140,11 +137,17 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<script src="vendor/server-info-parse.js"></script>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/addon-fit.js"></script>
 <script src="config.js"></script>
 <script src="config2.js"></script>
 <script src="handlers.js"></script>
 <script src="handlers2.js"></script>
 <script src="app.js"></script>
 <script src="settings.js"></script>
+<script src="mux.js"></script>
+<script src="extract.js"></script>
+<script src="ssh.js"></script>
 </body>
 </html>

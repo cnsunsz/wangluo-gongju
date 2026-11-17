@@ -203,3 +203,51 @@ TOOLS.push(
     ]
   }
 );
+
+Object.assign(ICONS, {
+  mux: '<svg viewBox="0 0 24 24"><path d="M4 7h6M4 12h6M4 17h6"/><path d="M10 7h4l6-3v6l-6-3zM10 17h4l6-3v6l-6-3z"/></svg>',
+  table: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M9 9v11M15 9v11"/></svg>',
+  arp: '<svg viewBox="0 0 24 24"><circle cx="7" cy="12" r="3"/><circle cx="17" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><path d="M10 12h4M14 9.5l-1.5 2.5M14 14.5L12.5 12"/></svg>',
+  ifstat: '<svg viewBox="0 0 24 24"><path d="M4 18V10M9 18V6M14 18v-7M19 18V4"/><path d="M3 20h18"/></svg>',
+  nat: '<svg viewBox="0 0 24 24"><rect x="3" y="8" width="7" height="8" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/><path d="M10 12h4"/></svg>',
+  extract: '<svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+  ssh: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 14l3-2-3-2M12 14h5"/></svg>'
+});
+
+TOOLS.push(
+  {
+    id: 'routes', name: '路由表', color: 'blue', icon: 'table', group: 'query',
+    sub: '本机 IPv4 / IPv6 路由', mode: 'json', endpoint: '/api/routes',
+    fields: [
+      FIELD('family', '协议', 'all', { type: 'select', options: [['all', '全部'], ['4', '仅 IPv4'], ['6', '仅 IPv6']] })
+    ]
+  },
+  {
+    id: 'arp', name: 'ARP 表', color: 'blue', icon: 'arp', group: 'query',
+    sub: '邻居缓存：IP / MAC / 网卡', mode: 'json', endpoint: '/api/arp',
+    fields: [FIELD('query', '关键字（IP / MAC / 网卡）', '')]
+  },
+  {
+    id: 'ifstat', name: '网卡流量', color: 'red', icon: 'ifstat', group: 'detect',
+    sub: '各网卡实时上下行速率', mode: 'sse', endpoint: '/api/ifstat/stream',
+    fields: [
+      FIELD('seconds', '时长(秒，0 为持续)', '0', { type: 'number', min: 0, max: 3600 })
+    ]
+  },
+  {
+    id: 'nattype', name: 'NAT 类型', color: 'red', icon: 'nat', group: 'detect',
+    sub: 'STUN 检测锥型 / 对称型 NAT', mode: 'json', endpoint: '/api/nat', fields: []
+  },
+  {
+    id: 'mux', name: '网卡叠加', color: 'pink', icon: 'mux', group: 'adv',
+    sub: '连接级多网卡聚合（本机代理）', mode: 'panel'
+  },
+  {
+    id: 'svrextract', name: '服务器信息提取', color: 'blue', icon: 'extract', group: 'query',
+    sub: '告警 / CMDB 原文 → 工单标题与模板', mode: 'panel'
+  },
+  {
+    id: 'ssh', name: 'SSH', color: 'pink', icon: 'ssh', group: 'adv',
+    sub: '远程终端，可保存常用主机', mode: 'panel'
+  }
+);

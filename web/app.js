@@ -19,6 +19,60 @@ function toast(msg) {
   toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
 }
 
+async function openInApp(url, title) {
+  if (!url) return false;
+  try {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
+      const r = await window.pywebview.api.open_url(url, title || '');
+      if (r && r.ok === false) throw new Error(r.error || '打开失败');
+      return true;
+    }
+  } catch (e) {}
+  try {
+    const resp = await fetch('/api/open_url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, title: title || '' })
+    });
+    const d = await resp.json();
+    if (!d.ok) throw new Error(d.error || '打开失败');
+    return true;
+  } catch (e) {
+    toast((e && e.message) ? e.message : '无法在软件内打开网页');
+    return false;
+  }
+}
+
+function isExternalHttp(url) {
+  try {
+    const u = new URL(url, location.href);
+    if (!/^https?:$/i.test(u.protocol)) return false;
+    return u.origin !== location.origin;
+  } catch (e) {
+    return false;
+  }
+}
+
+document.addEventListener('click', e => {
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+  const href = a.href;
+  if (!isExternalHttp(href)) return;
+  e.preventDefault();
+  openInApp(href, a.getAttribute('title') || a.textContent || '');
+}, true);
+
+(function () {
+  const orig = window.open;
+  window.open = function (url, name, specs) {
+    if (url && isExternalHttp(url)) {
+      openInApp(url, name && name !== '_blank' ? String(name) : '');
+      return null;
+    }
+    return orig.apply(window, arguments);
+  };
+})();
+
 function fmtBytes(n) {
   if (n == null) return '—';
   n = Number(n);
@@ -329,6 +383,9 @@ function renderTiles() {
 
 function openTool(tool) {
   stopRun();
+  if (window.PANELS && state.tool && state.tool.mode === 'panel' && PANELS._leave) {
+    try { PANELS._leave(state.tool.id); } catch (e) {}
+  }
   state.tool = tool;
   clearOutputs();
   setStatus('就绪', '');
@@ -336,7 +393,34 @@ function openTool(tool) {
   $('toolName').textContent = tool.name;
   $('toolSub').textContent = tool.sub || '';
   const form = $('toolForm');
+  const panel = $('customPanel');
   form.innerHTML = '';
+  if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+  if (tool.mode === 'panel') {
+    form.hidden = true;
+    if (panel) {
+      panel.hidden = false;
+      if (window.PANELS && typeof PANELS[tool.id] === 'function') PANELS[tool.id](panel);
+    }
+    $('pkgBtn').hidden = true;
+    $('cmpBtn').hidden = true;
+    $('console').classList.remove('tall');
+    const hideRun = tool.id === 'svrextract';
+    $('runBtn').hidden = hideRun;
+    $('stopBtn').hidden = hideRun;
+    if (tool.id === 'mux') { $('runBtn').textContent = '启动聚合'; $('stopBtn').textContent = '停止聚合'; }
+    else if (tool.id === 'ssh') { $('runBtn').textContent = '连接'; $('stopBtn').textContent = '断开'; }
+    else { $('runBtn').textContent = '开始'; $('stopBtn').textContent = '停止'; }
+    $('toolView').hidden = false;
+    $('home').style.display = 'none';
+    window.scrollTo(0, 0);
+    document.title = tool.name + ' · 网络工具';
+    return;
+  }
+  $('runBtn').hidden = false;
+  $('stopBtn').hidden = false;
+  $('runBtn').textContent = '开始';
+  $('stopBtn').textContent = '停止';
   form.hidden = !(tool.fields && tool.fields.length);
   (tool.fields || []).forEach(f => {
     const wrap = el('div', 'field' + (f.wide ? ' wide' : ''));
@@ -382,6 +466,15 @@ function openTool(tool) {
 
 function closeTool() {
   stopRun();
+  if (window.PANELS && state.tool && state.tool.mode === 'panel' && PANELS._leave) {
+    try { PANELS._leave(state.tool.id); } catch (e) {}
+  }
+  const panel = $('customPanel');
+  if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+  $('runBtn').hidden = false;
+  $('stopBtn').hidden = false;
+  $('runBtn').textContent = '开始';
+  $('stopBtn').textContent = '停止';
   state.tool = null;
   $('toolView').hidden = true;
   $('home').style.display = '';
@@ -433,14 +526,8 @@ async function runTriProbe() {
   stopRun();
   clearOutputs();
   appendLog(`目标：${target}`, 'ok');
-  const a = document.createElement('a');
-  a.href = 'https://boce.aliyun.com/detect/http';
-  a.target = '_blank';
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  appendLog('已在新标签页打开阿里云网络拨测。', 'info');
+  const opened = await openInApp('https://boce.aliyun.com/detect/http', '阿里云三网拨测');
+  appendLog(opened ? '已在软件内打开阿里云网络拨测窗口。' : '未能打开拨测窗口。', opened ? 'info' : 'err');
   const copied = await copyText(target);
   if (copied) {
     appendLog('域名已复制，点击页面输入框后 Ctrl+V 即可。', 'ok');
@@ -458,6 +545,10 @@ function run() {
   const tool = state.tool;
   if (!tool) return;
   if (tool.id === 'triprobe') { runTriProbe(); return; }
+  if (tool.mode === 'panel' && window.PANELS && typeof PANELS.run === 'function') {
+    PANELS.run(tool.id);
+    return;
+  }
   stopRun();
   clearOutputs();
   setBusy(true);
@@ -752,6 +843,10 @@ function init() {
   setInterval(tickClock, 15000);
   $('runBtn').onclick = run;
   $('stopBtn').onclick = () => {
+    if (state.tool && state.tool.mode === 'panel' && window.PANELS && typeof PANELS.stop === 'function') {
+      PANELS.stop(state.tool.id);
+      return;
+    }
     if (!state.running) return;
     stopRun();
     appendLog('已停止', 'warn');

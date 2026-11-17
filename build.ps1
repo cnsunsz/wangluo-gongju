@@ -43,7 +43,11 @@ $args = @(
   "--hidden-import", "PIL",
   "--hidden-import", "dns",
   "--hidden-import", "qrcode",
-  "--collect-all", "webview"
+  "--hidden-import", "paramiko",
+  "--hidden-import", "cryptography",
+  "--collect-all", "webview",
+  "--collect-all", "paramiko",
+  "--collect-all", "cryptography"
 ) + $addData + $addBin + @("app.py")
 
 Write-Host "开始打包..."

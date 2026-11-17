@@ -380,3 +380,61 @@ Object.assign(RESULT_HANDLERS, {
     if ((d.rows || []).length === 0) appendLog('没有匹配的连接，试试清空关键字。', 'warn');
   }
 });
+
+Object.assign(RESULT_HANDLERS, {
+  routes(d) {
+    const rows = d.rows || [];
+    setMetrics([
+      { k: '条目', v: d.count || rows.length },
+      { k: 'IPv4', v: d.ipv4 || 0 },
+      { k: 'IPv6', v: d.ipv6 || 0 }
+    ]);
+    showTable(['目标', '网关', '接口', '索引', '度量', '协议', '族'],
+      rows.map(r => [r.destination, r.gateway, r.interface, r.ifindex, r.metric, r.protocol, r.family]));
+    appendLog(`已读取 ${rows.length} 条路由`, rows.length ? 'ok' : 'warn');
+  },
+  arp(d) {
+    const rows = d.rows || [];
+    setMetrics([{ k: '邻居', v: d.count || rows.length }]);
+    showTable(['IP', 'MAC', '网卡', '状态', '族'],
+      rows.map(r => [r.ip, r.mac, r.interface, r.state, r.family]));
+    appendLog(`已读取 ${rows.length} 条 ARP / 邻居记录`, rows.length ? 'ok' : 'warn');
+  },
+  nattype(d) {
+    setMetrics([
+      { k: 'NAT 类型', v: d.type || '—' },
+      { k: '本机', v: d.local || '—' },
+      { k: '映射', v: d.mapped || '—' },
+      { k: '第二映射', v: d.mapped2 || '—' }
+    ]);
+    appendLog(d.type || '检测完成', 'ok');
+    if (d.summary) appendLog(d.summary, 'info');
+    if (d.server) appendLog('STUN 服务器：' + d.server, 'muted');
+    (d.logs || []).forEach(line => appendLog(line, 'muted'));
+  }
+});
+
+Object.assign(EVENT_HANDLERS, {
+  ifstat(d) {
+    if (d.type === 'start') {
+      appendLog(d.seconds ? `开始采样，持续 ${d.seconds} 秒` : '开始持续采样网卡流量（点「停止」结束）', 'head');
+      setStatus('采样中…', 'busy');
+    } else if (d.type === 'sample') {
+      const mbps = n => (Number(n) * 8 / 1e6).toFixed(2);
+      setMetrics([
+        { k: '下行合计', v: mbps(d.down_bps), u: 'Mbps' },
+        { k: '上行合计', v: mbps(d.up_bps), u: 'Mbps' },
+        { k: '已运行', v: d.elapsed, u: '秒' }
+      ]);
+      showTable(['网卡', '类型', '链路', '下行 Mbps', '上行 Mbps', '累计收', '累计发'],
+        (d.rows || []).map(r => [
+          r.name, r.kind, r.speed,
+          mbps(r.down_bps), mbps(r.up_bps),
+          fmtBytes(r.down), fmtBytes(r.up)
+        ]));
+    } else if (d.type === 'done') {
+      appendLog('网卡流量采样结束', 'info');
+      setStatus('完成', 'ok');
+    }
+  }
+});

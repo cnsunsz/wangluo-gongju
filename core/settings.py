@@ -1,7 +1,10 @@
-r"""用户偏好：最小化到托盘、开机自启、关闭后保留后台。
+r"""用户偏好：最小化到托盘、开机自启。
 
-全部保存在 %LOCALAPPDATA%\网络工具\settings.json，默认均为关闭。
-关闭窗口的默认行为仍然是完全退出。
+全部保存在 %LOCALAPPDATA%\网络工具\settings.json。
+「最小化运行」默认开启，用户仍可关闭。
+「保留后台运行」不再作为可选项：关闭窗口一律隐藏到托盘并保持运行，
+读取旧配置时也会强制 keep_background=True。彻底退出只能通过托盘「退出」
+或窗口内的「退出程序」。
 """
 from __future__ import annotations
 
@@ -13,9 +16,9 @@ from .paths import APP_NAME, is_frozen, runtime_dir
 
 KEYS = ("minimize_to_tray", "autostart", "keep_background")
 DEFAULTS = {
-    "minimize_to_tray": False,
+    "minimize_to_tray": True,
     "autostart": False,
-    "keep_background": False,
+    "keep_background": True,
 }
 
 RUN_VALUE = APP_NAME
@@ -37,16 +40,20 @@ def load() -> dict:
                     cfg[k] = bool(data[k])
     except (OSError, ValueError):
         pass
+    # 关闭窗口必须留在后台，不被旧版 settings.json 覆盖
+    cfg["keep_background"] = True
     return cfg
 
 
 def save(data: dict) -> dict:
     cfg = load()
     for k in KEYS:
-        if k in data:
+        if k in data and k != "keep_background":
             cfg[k] = bool(data[k])
+    cfg["keep_background"] = True
     path = settings_path()
     tmp = path + ".tmp"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
@@ -75,7 +82,6 @@ def apply_autostart(enabled: bool) -> None:
                     winreg.DeleteValue(key, RUN_VALUE)
                 except FileNotFoundError:
                     pass
-            # 清理旧版「网络万用表」开机自启项
             if RUN_VALUE != "网络万用表":
                 try:
                     winreg.DeleteValue(key, "网络万用表")

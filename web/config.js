@@ -11,7 +11,6 @@ const ICONS = {
   timing: '<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4.2l2.6 2"/><path d="M9 2h6M12 2v3"/></svg>',
   gauge: '<svg viewBox="0 0 24 24"><path d="M3.5 18.5a9 9 0 1 1 17 0"/><path d="M12 14.5l4.2-4.2"/><circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/></svg>',
   globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3.2 3.6 3.2 14.4 0 18M12 3c-3.2 3.6-3.2 14.4 0 18"/></svg>',
-  share: '<svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.8"/><circle cx="6" cy="12" r="2.8"/><circle cx="18" cy="19" r="2.8"/><path d="M8.5 10.6l7-4M8.5 13.4l7 4"/></svg>',
   pin: '<svg viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>',
   calc: '<svg viewBox="0 0 24 24"><rect x="4" y="2.5" width="16" height="19" rx="2"/><path d="M7.5 6.5h9M8 11h.01M12 11h.01M16 11h.01M8 15h.01M12 15h.01M16 15h.01M8 19h.01M12 19h.01M16 19h.01"/></svg>',
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 6.5V12l3.5 2"/></svg>',
@@ -153,10 +152,6 @@ const TOOLS = [
       FIELD('headers', '请求头（每行 k: v）', 'Content-Type: application/json', { type: 'textarea', wide: true }),
       FIELD('body', '请求体', '{"hello": "world"}', { type: 'textarea', wide: true })
     ]
-  },
-  {
-    id: 'share', name: '分享软件', color: 'red', icon: 'share', group: 'detect',
-    sub: 'PC 端不适用', disabled: true, badge: 'PC 不适用'
   },
   {
     id: 'iplocal', name: '你的IP信息', color: 'blue', icon: 'globe', group: 'query',

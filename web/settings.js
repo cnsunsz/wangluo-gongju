@@ -1,4 +1,4 @@
-/* 应用设置：托盘最小化、开机自启、关闭后保留后台 */
+/* 应用设置：托盘最小化、开机自启；关闭窗口始终留在后台 */
 (function () {
   const $ = id => document.getElementById(id);
 
@@ -12,7 +12,6 @@
       if (!d.ok) return;
       $('setMinimize').checked = !!d.minimize_to_tray;
       $('setAutostart').checked = !!d.autostart;
-      $('setBackground').checked = !!d.keep_background;
       if (d.run_dir) {
         $('settingsPath').textContent = '配置与日志保存在：' + d.run_dir + '（不会在程序目录创建 data 文件夹）';
       }
@@ -34,19 +33,25 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           minimize_to_tray: $('setMinimize').checked,
-          autostart: $('setAutostart').checked,
-          keep_background: $('setBackground').checked
+          autostart: $('setAutostart').checked
         })
       });
       const d = await resp.json();
       if (!d.ok) throw new Error(d.error || '保存失败');
       msg.className = 'modal-msg ok';
-      msg.textContent = '已保存。关闭窗口默认仍会退出；仅在开启「保留后台运行」时才会留在托盘。';
+      msg.textContent = '已保存。关闭窗口会隐藏到托盘并保持运行；只有托盘「退出」或「退出程序」才会结束进程。';
       if (typeof toast === 'function') toast('设置已保存');
     } catch (e) {
       msg.className = 'modal-msg err';
       msg.textContent = e.message || '保存失败';
     }
+  }
+
+  async function exitApp() {
+    if (!confirm('确定退出网络工具？会结束进程（包括正在运行的网卡叠加和 SSH 会话）。')) return;
+    try {
+      await fetch('/api/shutdown', { method: 'POST' });
+    } catch (e) {}
   }
 
   function openHelp() {
@@ -70,9 +75,11 @@
     const help = $('helpLink');
     if (help) help.onclick = e => { e.preventDefault(); openHelp(); };
     const sc = $('settingsClose'), sc2 = $('settingsCancel'), ss = $('settingsSave');
+    const se = $('settingsExit');
     if (sc) sc.onclick = closeSettings;
     if (sc2) sc2.onclick = closeSettings;
     if (ss) ss.onclick = saveSettings;
+    if (se) se.onclick = exitApp;
     const hc = $('helpClose');
     if (hc) hc.onclick = closeHelp;
     const sm = $('settingsModal');
