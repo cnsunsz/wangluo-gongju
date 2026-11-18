@@ -2,7 +2,15 @@
 
 桌面网络工具箱（作者：Lorenzo），提供 **Windows** 与 **macOS** 版本。在本地打开独立窗口，内置 Ping、traceroute、端口扫描、HTTP 探测、DNS、测速、系统体检、抓包分析、网卡叠加、SSH、服务器信息提取等功能（Windows 共 48 项；macOS 隐藏仅 Windows 可用的「Windows 诊断」和「WLAN 分析」）。
 
-当前版本：**1.2.6**。
+当前版本：**1.2.7**。
+
+## 1.2.7 主要变化
+
+- **抓包可解析 VXLAN 内层**：UDP 4789 / 8472 会解开 VXLAN 头中的 VNI 和内层以太网 / IPv4 / IPv6，列表、详情和结论里能看到内层通信双方，而不只是外层 VTEP 的 IPv4。
+- **隧道与 ICMP 原始报文**：支持 6in4 / 4in6、GRE 隧道，以及 ICMP / ICMPv6 差错报文中携带的原始数据报；IPv6 邻居发现可显示目标地址。
+- **识别云平台端口拦截**：整次抓包和单包结论能识别移动云会拦截的高危端口（135、137–139、445、4444），以及国内云常见的出站 TCP 25 封禁。当抓包里只见到 SYN 没有回应、被 RST，或出现 ICMP 管理禁止时，会按这些特征提示，并尽量与同一目的上握手成功的其他端口对照。
+- **更清楚地判断连接为什么失败**：结论会区分目的端口未监听（对端 RST 或 ICMP 端口不可达）、中间设备或云平台管理拦截（静默丢弃或 ICMP 管理禁止）、对端主机或网络不可达，以及抓包窗口太短、尚不能下结论的情况。同一目的上的 SYN 失败会与对应的 ICMP 差错关联起来说明，隧道（如 VXLAN）内层的 TCP 握手也会纳入分析。工具不会把短窗口里的单个 SYN 写成已经确认被封，也不会仅凭端口断言环境一定是移动云。
+- **应用层与路径问题也会写入结论**：当抓包里确实能看出时，会提示 DNS 超时、NXDOMAIN 或 SERVFAIL、HTTP 4xx / 5xx、TLS Alert、持续 TCP 零窗口，以及 ICMP 需要分片或报文过大（路径 MTU）等问题。
 
 ## 1.2.6 主要变化
 
@@ -72,8 +80,8 @@
 
 在 [Releases](https://github.com/cnsunsz/wangluo-gongju/releases) 下载对应系统的包：
 
-- Windows：`WangLuoGongJu-v1.2.6.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
-- macOS Apple Silicon：`WangLuoGongJu-v1.2.6-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.6-macOS-x64.zip`。
+- Windows：`WangLuoGongJu-v1.2.7.exe`（可改名为「网络工具.exe」），双击即可使用。Windows 11 一般已自带 WebView2；若窗口无法打开，请先安装 [Microsoft Edge WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)。
+- macOS Apple Silicon：`WangLuoGongJu-v1.2.7-macOS-arm64.zip`，解压得到「网络工具.app」。若提供 Intel 包，文件名为 `WangLuoGongJu-v1.2.7-macOS-x64.zip`。
 
 点减号（macOS 为黄灯）会最小化到任务栏 / Dock，点关闭才会隐藏到后台并保持运行。需要彻底退出时，请用托盘或菜单栏图标「退出」，或打开窗口后到「设置」里点「退出程序」。标题栏「搜索工具」可过滤主界面图标。
 

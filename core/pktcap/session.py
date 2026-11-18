@@ -210,6 +210,24 @@ class _Session:
 SESS = _Session()
 
 
+
+_TUNNEL_VIEW_KEYS = (
+    "vni", "tunnel", "inner_src", "inner_dst", "inner_protocol", "inner_info",
+    "inner_ip_version", "inner_sport", "inner_dport",
+    "outer_src", "outer_dst", "outer_ip_version", "ip_version",
+    "inner_l4", "inner_tcp_flags", "inner_tcp_seq", "inner_tcp_ack",
+    "inner_tcp_window", "inner_payload_len", "inner_stream_key", "inner_ttl",
+    "icmp_orig_src", "icmp_orig_dst", "icmp_orig_protocol",
+    "icmp_orig_sport", "icmp_orig_dport", "icmp_orig_info",
+)
+
+
+def _attach_tunnel_fields(dest: dict, view: dict) -> dict:
+    for k in _TUNNEL_VIEW_KEYS:
+        dest[k] = view.get(k)
+    return dest
+
+
 def _summary_of(rec: dict) -> dict:
     v = rec.get("view")
     if not v:
@@ -217,7 +235,7 @@ def _summary_of(rec: dict) -> dict:
                     orig_len=rec.get("orig_len"), linktype=rec.get("linktype", 1),
                     iface=rec.get("iface") or "")
         rec["view"] = v
-    return {
+    out = {
         "no": v["no"],
         "ts": v["ts"],
         "length": v["length"],
@@ -239,6 +257,7 @@ def _summary_of(rec: dict) -> dict:
         "payload_len": v.get("payload_len") or 0,
         "ttl": v.get("ttl"),
     }
+    return _attach_tunnel_fields(out, v)
 
 
 def _ensure_view(rec: dict) -> dict:
@@ -468,7 +487,7 @@ def packet_summaries(after: int = 0, limit: int = 500, query: str = "") -> dict:
     )}}
 
 
-def _stream_views_locked(key) -> list[dict]:
+def _stream_views_locked(key, field: str = "stream_key") -> list[dict]:
     if not key:
         return []
     out = []
@@ -477,7 +496,7 @@ def _stream_views_locked(key) -> list[dict]:
             v = _ensure_view(rec)
         except Exception:
             continue
-        if v.get("stream_key") == key:
+        if v.get(field) == key:
             out.append(v)
     return out
 
@@ -488,7 +507,7 @@ def _analysis_fields(view: dict) -> dict:
         "sport", "dport", "ip_src", "ip_dst", "l4", "stream_key",
         "tcp_flags", "tcp_seq", "tcp_ack", "tcp_window", "payload_len", "ttl",
         "layers",
-    )
+    ) + _TUNNEL_VIEW_KEYS
     return {k: view.get(k) for k in keys}
 
 
@@ -501,7 +520,18 @@ def packet_detail(no: int) -> dict:
         view = _ensure_view(rec)
         raw = rec["data"]
         peers = _stream_views_locked(view.get("stream_key"))
-    analysis = analyze_packet(view, raw=raw, stream=peers)
+        inner_peers = _stream_views_locked(view.get("inner_stream_key"), field="inner_stream_key")
+        capture_views = []
+        for rec in SESS.packets:
+            try:
+                capture_views.append(_ensure_view(rec))
+            except Exception:
+                continue
+        end_ts = max((v.get("ts") or 0) for v in capture_views) if capture_views else None
+    analysis = analyze_packet(
+        view, raw=raw, stream=peers, inner_stream=inner_peers,
+        capture_end_ts=end_ts, capture_views=capture_views,
+    )
     return {
         "no": view["no"],
         "ts": view["ts"],
@@ -532,7 +562,6 @@ def diagnose(query: str = "") -> dict:
     with SESS.lock:
         recs = list(SESS.packets)
     views = []
-    checksum_hits = []
     for rec in recs:
         try:
             view = _ensure_view(rec)
@@ -561,14 +590,13 @@ def diagnose(query: str = "") -> dict:
             "ttl": view.get("ttl"),
             "layers": view.get("layers"),
         }
+        _attach_tunnel_fields(summary, view)
         if query and not match_filter(summary, query):
             continue
-        # 校验和提示（仅未截断）
-        for h in _checksum_hints(view, rec.get("data") or b""):
-            if h.get("level") == "error":
-                checksum_hits.append(f"第 {view.get('no')} 号 {h.get('text')}")
-        if checksum_hits and views is not None:
-            summary["_checksum_hints"] = [h for h in checksum_hits if f"第 {view.get('no')} 号" in h]
+        summary["_checksum_hints"] = [
+            h.get("text") for h in _checksum_hints(view, rec.get("data") or b"")
+            if h.get("level") == "error"
+        ]
         views.append(summary)
     result = diagnose_capture(views, filtered=bool(query))
     return result

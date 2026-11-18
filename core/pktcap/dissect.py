@@ -25,8 +25,11 @@ ETH_QINQ = 0x88A8
 ETH_VLAN_OLD = 0x9100
 
 IP_ICMP = 1
+IP_IPV4 = 4
 IP_TCP = 6
 IP_UDP = 17
+IP_IPV6_ENCAP = 41
+IP_GRE = 47
 IP_ICMPV6 = 58
 
 ETH_TYPES = {
@@ -60,6 +63,7 @@ PORT_NAMES = {
     1883: "mqtt", 3306: "mysql", 3389: "rdp", 5060: "sip", 5353: "mdns",
     5432: "postgres", 5672: "amqp", 6379: "redis", 8080: "http-alt",
     8443: "https-alt", 27017: "mongodb",
+    4789: "vxlan", 8472: "vxlan", 6081: "geneve",
 }
 
 TCP_FLAGS = (
@@ -81,6 +85,18 @@ TLS_HS = {
     16: "ClientKeyExchange", 20: "Finished",
 }
 TLS_VER = {0x0200: "SSL 2.0", 0x0300: "SSL 3.0", 0x0301: "TLS 1.0", 0x0302: "TLS 1.1", 0x0303: "TLS 1.2", 0x0304: "TLS 1.3"}
+TLS_ALERT = {
+    0: "close_notify", 10: "unexpected_message", 20: "bad_record_mac",
+    21: "decryption_failed", 22: "record_overflow", 30: "decompression_failure",
+    40: "handshake_failure", 42: "bad_certificate", 43: "unsupported_certificate",
+    44: "certificate_revoked", 45: "certificate_expired", 46: "certificate_unknown",
+    47: "illegal_parameter", 48: "unknown_ca", 49: "access_denied",
+    50: "decode_error", 51: "decrypt_error", 70: "protocol_version",
+    71: "insufficient_security", 80: "internal_error", 86: "inappropriate_fallback",
+    90: "user_canceled", 100: "no_renegotiation", 109: "missing_extension",
+    110: "unsupported_extension", 112: "unrecognized_name",
+    116: "certificate_required", 120: "no_application_protocol",
+}
 
 
 def node(name: str, value: Any = None, offset: int = 0, length: int = 0,
@@ -182,6 +198,33 @@ class _Ctx:
         self.stream_key: tuple | None = None
         self.ttl: int | None = None
         self.ip_version: int | None = None
+        self.encap_depth = 0
+        self.vni: int | None = None
+        self.tunnel = ""
+        self.inner_src = ""
+        self.inner_dst = ""
+        self.inner_protocol = ""
+        self.inner_info = ""
+        self.inner_ip_version: int | None = None
+        self.inner_sport: int | None = None
+        self.inner_dport: int | None = None
+        self.outer_src = ""
+        self.outer_dst = ""
+        self.outer_ip_version: int | None = None
+        self.inner_l4 = ""
+        self.inner_tcp_flags = 0
+        self.inner_tcp_seq: int | None = None
+        self.inner_tcp_ack: int | None = None
+        self.inner_tcp_window: int | None = None
+        self.inner_payload_len = 0
+        self.inner_stream_key: tuple | None = None
+        self.inner_ttl: int | None = None
+        self.icmp_orig_src = ""
+        self.icmp_orig_dst = ""
+        self.icmp_orig_protocol = ""
+        self.icmp_orig_sport: int | None = None
+        self.icmp_orig_dport: int | None = None
+        self.icmp_orig_info = ""
 
 
 def dissect(raw: bytes, *, ts: float = 0.0, number: int = 1,
@@ -243,6 +286,32 @@ def dissect(raw: bytes, *, ts: float = 0.0, number: int = 1,
         "stream_key": ctx.stream_key,
         "ttl": ctx.ttl,
         "ip_version": ctx.ip_version,
+        "vni": ctx.vni,
+        "tunnel": ctx.tunnel,
+        "inner_src": ctx.inner_src,
+        "inner_dst": ctx.inner_dst,
+        "inner_protocol": ctx.inner_protocol,
+        "inner_info": ctx.inner_info,
+        "inner_ip_version": ctx.inner_ip_version,
+        "inner_sport": ctx.inner_sport,
+        "inner_dport": ctx.inner_dport,
+        "outer_src": ctx.outer_src,
+        "outer_dst": ctx.outer_dst,
+        "outer_ip_version": ctx.outer_ip_version,
+        "inner_l4": ctx.inner_l4,
+        "inner_tcp_flags": ctx.inner_tcp_flags,
+        "inner_tcp_seq": ctx.inner_tcp_seq,
+        "inner_tcp_ack": ctx.inner_tcp_ack,
+        "inner_tcp_window": ctx.inner_tcp_window,
+        "inner_payload_len": ctx.inner_payload_len,
+        "inner_stream_key": ctx.inner_stream_key,
+        "inner_ttl": ctx.inner_ttl,
+        "icmp_orig_src": ctx.icmp_orig_src,
+        "icmp_orig_dst": ctx.icmp_orig_dst,
+        "icmp_orig_protocol": ctx.icmp_orig_protocol,
+        "icmp_orig_sport": ctx.icmp_orig_sport,
+        "icmp_orig_dport": ctx.icmp_orig_dport,
+        "icmp_orig_info": ctx.icmp_orig_info,
     }
 
 
@@ -278,8 +347,10 @@ def _dissect_link(data: bytes, off: int, linktype: int, layers: list, ctx: _Ctx)
         ]))
         if family in (24, 28, 30):
             _ipv6(data, off + 4, layers, ctx)
-        else:
+        elif family == 2:
             _ipv4(data, off + 4, layers, ctx)
+        else:
+            _ip_or_ver(data, off + 4, layers, ctx)
         return
     if linktype == DLT_LINUX_SLL:
         _sll(data, off, layers, ctx)
@@ -320,6 +391,24 @@ def _sll2(data: bytes, off: int, layers: list, ctx: _Ctx) -> None:
         layers.append(node("Linux cooked v2", "截断", off, max(0, len(data) - off)))
         return
     etype = u16(data, off)
+    if_index = u32(data, off + 4)
+    hatype = u16(data, off + 8)
+    pkttype = data[off + 10]
+    halen = data[off + 11]
+    addr = data[off + 12:off + 20]
+    typ = {0: "Unicast to us", 1: "Broadcast", 2: "Multicast", 3: "Sent by us", 4: "Sent to other"}.get(pkttype, str(pkttype))
+    mac = mac_str(addr, 0) if halen == 6 else addr[:halen].hex() if halen else addr.hex()
+    layers.append(node("Linux cooked capture v2", summary=f"{typ}, protocol 0x{etype:04x}",
+                       offset=off, length=20, children=[
+        node("Protocol", f"0x{etype:04x} ({ETH_TYPES.get(etype, '未知')})", off, 2),
+        node("Interface index", str(if_index), off + 4, 4),
+        node("Link-layer address type", str(hatype), off + 8, 2),
+        node("Packet type", typ, off + 10, 1),
+        node("Link-layer address length", str(halen), off + 11, 1),
+        node("Source", mac, off + 12, 8),
+    ]))
+    if halen:
+        ctx.src = mac
     _ethertype(data, off + 20, etype, layers, ctx)
 
 
@@ -596,6 +685,12 @@ def _l4(data: bytes, off: int, end: int, proto: int, layers: list, ctx: _Ctx) ->
         _icmp(data, off, end, layers, ctx)
     elif proto == IP_ICMPV6:
         _icmpv6(data, off, end, layers, ctx)
+    elif proto == IP_IPV4:
+        _ip_tunnel(data, off, end, layers, ctx, version=4)
+    elif proto == IP_IPV6_ENCAP:
+        _ip_tunnel(data, off, end, layers, ctx, version=6)
+    elif proto == IP_GRE:
+        _gre(data, off, end, layers, ctx)
     else:
         name = IP_PROTOS.get(proto, f"IP proto {proto}")
         ctx.protocol = name
@@ -608,7 +703,13 @@ def _tcp(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
     ctx.l4 = "TCP"
     ctx.protocol = "TCP"
     if not _ok(data, off, 20) or off + 20 > end:
-        layers.append(node("Transmission Control Protocol", "截断", off, max(0, end - off)))
+        fields = []
+        if _ok(data, off, 4) and off + 4 <= end:
+            ctx.sport, ctx.dport = u16(data, off), u16(data, off + 2)
+            fields = [node("Source Port", port_label(ctx.sport), off, 2),
+                      node("Destination Port", port_label(ctx.dport), off + 2, 2)]
+            ctx.info = f"{ctx.sport} → {ctx.dport}（TCP 首部不完整）"
+        layers.append(node("Transmission Control Protocol", "截断", off, max(0, end - off), children=fields))
         return
     sport = u16(data, off)
     dport = u16(data, off + 2)
@@ -783,8 +884,12 @@ def _udp(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
     if sport in (67, 68) or dport in (67, 68):
         _dhcp(data, payload_off, payload_end, layers, ctx)
         return
-    if _looks_http(data[payload_off:payload_end]):
-        _http(data[payload_off:payload_end], payload_off, layers, ctx)
+    payload = data[payload_off:payload_end]
+    if _looks_vxlan(payload, sport, dport):
+        _vxlan(data, payload_off, payload_end, layers, ctx)
+        return
+    if _looks_http(payload):
+        _http(payload, payload_off, layers, ctx)
 
 
 def _set_stream(ctx: _Ctx, l4: str) -> None:
@@ -796,6 +901,286 @@ def _set_stream(ctx: _Ctx, l4: str) -> None:
         ctx.stream_key = (l4, a[0], a[1], b[0], b[1])
     else:
         ctx.stream_key = (l4, b[0], b[1], a[0], a[1])
+
+
+def _ctx_snap(ctx: _Ctx) -> dict:
+    keys = (
+        "src", "dst", "protocol", "info", "sport", "dport", "ip_src", "ip_dst",
+        "l4", "tcp_flags", "tcp_seq", "tcp_ack", "tcp_window",
+        "payload_off", "payload_len", "stream_key", "ttl", "ip_version",
+    )
+    return {k: getattr(ctx, k) for k in keys}
+
+
+def _ctx_restore(ctx: _Ctx, snap: dict) -> None:
+    for k, v in snap.items():
+        setattr(ctx, k, v)
+
+
+def _begin_encap(ctx: _Ctx) -> bool:
+    if ctx.encap_depth >= 4:
+        return False
+    ctx.encap_depth += 1
+    return True
+
+
+def _remember_inner(ctx: _Ctx, outer: dict) -> None:
+    ctx.inner_src = ctx.src
+    ctx.inner_dst = ctx.dst
+    ctx.inner_protocol = ctx.protocol
+    ctx.inner_info = ctx.info
+    ctx.inner_ip_version = ctx.ip_version
+    ctx.inner_sport = ctx.sport
+    ctx.inner_dport = ctx.dport
+    ctx.inner_l4 = ctx.l4
+    ctx.inner_tcp_flags = ctx.tcp_flags
+    ctx.inner_tcp_seq = ctx.tcp_seq
+    ctx.inner_tcp_ack = ctx.tcp_ack
+    ctx.inner_tcp_window = ctx.tcp_window
+    ctx.inner_payload_len = ctx.payload_len
+    ctx.inner_stream_key = ctx.stream_key
+    ctx.inner_ttl = ctx.ttl
+    ctx.outer_src = outer.get("ip_src") or outer.get("src") or ""
+    ctx.outer_dst = outer.get("ip_dst") or outer.get("dst") or ""
+    ctx.outer_ip_version = outer.get("ip_version")
+
+
+def _inner_info_text(ctx: _Ctx) -> str:
+    proto = ctx.inner_protocol or ctx.protocol or "数据"
+    src = ctx.inner_src or ctx.src
+    dst = ctx.inner_dst or ctx.dst
+    extra = ctx.inner_info or ctx.info or ""
+    text = proto
+    if src and dst and src != "—":
+        text += f" {src} → {dst}"
+    if extra and extra not in text:
+        text += f" {extra}"
+    return text
+
+
+VXLAN_PORTS = {4789, 8472}
+
+
+def _looks_vxlan(payload: bytes, sport: int, dport: int) -> bool:
+    if len(payload) < 8:
+        return False
+    flags = payload[0]
+    i_bit = bool(flags & 0x08)
+    rsvd = payload[1] == 0 and payload[2] == 0 and payload[3] == 0 and payload[7] == 0
+    etype_ok = False
+    if len(payload) >= 8 + 14:
+        etype = u16(payload, 20)
+        etype_ok = (
+            etype in ETH_TYPES
+            or etype in (ETH_VLAN, ETH_QINQ, ETH_VLAN_OLD, ETH_IPV4, ETH_ARP, ETH_IPV6)
+            or 64 <= etype <= 1500
+        )
+    well_known = sport in VXLAN_PORTS or dport in VXLAN_PORTS
+    if well_known:
+        return i_bit or rsvd or etype_ok
+    return i_bit and rsvd and etype_ok
+
+
+def _vxlan(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
+    if not _ok(data, off, 8) or off + 8 > end:
+        layers.append(node("Virtual eXtensible Local Area Network", "截断", off, max(0, end - off)))
+        ctx.protocol = "VXLAN"
+        ctx.info = "VXLAN 截断"
+        ctx.tunnel = "VXLAN"
+        return
+    flags = data[off]
+    i_bit = bool(flags & 0x08)
+    reserved1 = int.from_bytes(data[off + 1:off + 4], "big")
+    vni = u24(data, off + 4)
+    reserved2 = data[off + 7]
+    ctx.vni = vni
+    ctx.tunnel = "VXLAN"
+    children = [
+        node("Flags", f"0x{flags:02x}", off, 1, children=[
+            node("I (VNI 有效)", "Set" if i_bit else "Not set", off, 1),
+        ]),
+        node("Reserved", f"0x{reserved1:06x}", off + 1, 3),
+        node("VNI", str(vni), off + 4, 3),
+        node("Reserved", f"0x{reserved2:02x}", off + 7, 1),
+    ]
+    layers.append(node("Virtual eXtensible Local Area Network",
+                       summary=f"VNI {vni}",
+                       offset=off, length=8, children=children))
+    inner_off = off + 8
+    if inner_off >= end:
+        ctx.protocol = "VXLAN"
+        ctx.info = f"VNI {vni}（无内层帧）"
+        return
+    if not _begin_encap(ctx):
+        ctx.protocol = "VXLAN"
+        ctx.info = f"VNI {vni}（封装层数过多，停止继续解析）"
+        layers.append(node("Inner Frame", "封装层数过多，停止继续解析", inner_off, end - inner_off))
+        return
+    outer = _ctx_snap(ctx)
+    if _ok(data, inner_off, 14):
+        _eth(data, inner_off, layers, ctx)
+    else:
+        layers.append(node("Ethernet", "内层以太网截断", inner_off, max(0, end - inner_off)))
+        ctx.protocol = "VXLAN"
+        ctx.info = f"VNI {vni}（内层以太网截断）"
+        return
+    _remember_inner(ctx, outer)
+    info = f"VNI {vni}；内层 {_inner_info_text(ctx)}"
+    _ctx_restore(ctx, outer)
+    ctx.vni = vni
+    ctx.tunnel = "VXLAN"
+    ctx.protocol = "VXLAN"
+    ctx.info = info
+    # restore inner_* after restore? remember was before restore; inner_* not in snap
+    # After _ctx_restore, inner_* still set. Good.
+
+
+def _ip_tunnel(data: bytes, off: int, end: int, layers: list, ctx: _Ctx, *, version: int) -> None:
+    if not _begin_encap(ctx):
+        name = "IPv6" if version == 6 else "IPv4"
+        layers.append(node(name, "封装层数过多，停止继续解析", off, max(0, end - off)))
+        return
+    outer = _ctx_snap(ctx)
+    if version == 6:
+        _ipv6(data, off, layers, ctx)
+    else:
+        _ipv4(data, off, layers, ctx)
+    if outer.get("ip_version") == 4 and ctx.ip_version == 6:
+        ctx.tunnel = "6in4"
+        prefix = "IPv6-in-IPv4（6in4）"
+    elif outer.get("ip_version") == 6 and ctx.ip_version == 4:
+        ctx.tunnel = "4in6"
+        prefix = "IPv4-in-IPv6"
+    else:
+        ctx.tunnel = "IP-in-IP"
+        prefix = "IP 隧道"
+    _remember_inner(ctx, outer)
+    if ctx.info:
+        ctx.info = f"{prefix}；{ctx.info}"
+    else:
+        ctx.info = prefix
+    # Keep inner addresses so IPv6 is visible in the packet list.
+
+
+def _gre(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
+    if not _ok(data, off, 4) or off + 4 > end:
+        layers.append(node("Generic Routing Encapsulation", "截断", off, max(0, end - off)))
+        ctx.protocol = "GRE"
+        ctx.info = "GRE 截断"
+        ctx.tunnel = "GRE"
+        return
+    flags_ver = u16(data, off)
+    proto = u16(data, off + 2)
+    csum_flag = bool(flags_ver & 0x8000)
+    key_flag = bool(flags_ver & 0x2000)
+    seq_flag = bool(flags_ver & 0x1000)
+    version = flags_ver & 0x7
+    cur = off + 4
+    children = [
+        node("Flags and Version", f"0x{flags_ver:04x} (ver {version})", off, 2),
+        node("Protocol Type", f"0x{proto:04x} ({ETH_TYPES.get(proto, '未知') if proto != 0x6558 else 'Transparent Ethernet Bridging'})", off + 2, 2),
+    ]
+    if csum_flag and _ok(data, cur, 4):
+        children.append(node("Checksum", f"0x{u16(data, cur):04x}", cur, 2))
+        children.append(node("Reserved", f"0x{u16(data, cur + 2):04x}", cur + 2, 2))
+        cur += 4
+    if key_flag and _ok(data, cur, 4):
+        children.append(node("Key", f"0x{u32(data, cur):08x}", cur, 4))
+        cur += 4
+    if seq_flag and _ok(data, cur, 4):
+        children.append(node("Sequence Number", str(u32(data, cur)), cur, 4))
+        cur += 4
+    proto_name = "Transparent Ethernet Bridging" if proto == 0x6558 else ETH_TYPES.get(proto, "未知")
+    layers.append(node("Generic Routing Encapsulation",
+                       summary=f"Protocol 0x{proto:04x} ({proto_name})",
+                       offset=off, length=cur - off, children=children))
+    ctx.protocol = "GRE"
+    ctx.tunnel = "GRE"
+    ctx.info = f"GRE {proto_name}"
+    if cur >= end:
+        return
+    if not _begin_encap(ctx):
+        ctx.info = "GRE（封装层数过多）"
+        return
+    outer = _ctx_snap(ctx)
+    if proto == 0x6558:
+        _eth(data, cur, layers, ctx)
+    elif proto == ETH_IPV4:
+        _ipv4(data, cur, layers, ctx)
+    elif proto == ETH_IPV6:
+        _ipv6(data, cur, layers, ctx)
+    elif proto == ETH_ARP:
+        _arp(data, cur, layers, ctx)
+    else:
+        if end > cur:
+            layers.append(node("Data", f"{end - cur} bytes", cur, end - cur))
+        ctx.info = f"GRE 协议 0x{proto:04x}（未解出上层）"
+        return
+    _remember_inner(ctx, outer)
+    ctx.tunnel = "GRE"
+    ctx.info = f"GRE；内层 {_inner_info_text(ctx)}"
+    # Keep inner src/dst/protocol so IPv6 inside GRE is visible.
+
+
+def _icmp_original(data: bytes, off: int, end: int, layers: list, ctx: _Ctx, *, ipv6: bool) -> None:
+    if off >= end or not _ok(data, off, 1):
+        return
+    if not _begin_encap(ctx):
+        return
+    outer_ctx = ctx
+    ctx = _Ctx()
+    data = data[:end]
+    inner_layers: list = []
+    ver = data[off] >> 4
+    if ipv6 or ver == 6:
+        if _ok(data, off, 40):
+            _ipv6(data, off, inner_layers, ctx)
+        else:
+            inner_layers.append(node("Internet Protocol Version 6", "截断的原报文", off, max(0, end - off)))
+    elif ver == 4:
+        _ipv4(data, off, inner_layers, ctx)
+    else:
+        return
+    summary = f"{ctx.protocol} {ctx.src} → {ctx.dst}" if ctx.src else (ctx.protocol or "原报文")
+    if ctx.info:
+        summary += f" {ctx.info}"
+    layers.append(node("Original datagram", summary=summary, offset=off, length=max(0, end - off),
+                       children=inner_layers))
+    outer_ctx.icmp_orig_src = ctx.ip_src or ctx.src or ""
+    outer_ctx.icmp_orig_dst = ctx.ip_dst or ctx.dst or ""
+    outer_ctx.icmp_orig_protocol = ctx.l4 or ctx.protocol or ""
+    outer_ctx.icmp_orig_sport = ctx.sport
+    outer_ctx.icmp_orig_dport = ctx.dport
+    outer_ctx.icmp_orig_info = ctx.info or ""
+
+
+def _icmpv6_nd_options(data: bytes, off: int, end: int, children: list) -> None:
+    cur = off
+    hops = 0
+    opts = []
+    while cur + 2 <= end and hops < 16:
+        hops += 1
+        typ = data[cur]
+        raw_len = data[cur + 1]
+        length = raw_len * 8
+        if raw_len < 1 or cur + length > end:
+            opts.append(node(f"ND Option {typ}", "截断或长度非法", cur, max(0, end - cur)))
+            break
+        if typ == 1 and length >= 8:
+            opts.append(node("Source Link-layer Address", mac_str(data, cur + 2), cur, length))
+        elif typ == 2 and length >= 8:
+            opts.append(node("Target Link-layer Address", mac_str(data, cur + 2), cur, length))
+        elif typ == 3 and length >= 32:
+            prefix_len = data[cur + 2]
+            prefix = ipv6_str(data, cur + 16)
+            opts.append(node("Prefix Information", f"{prefix}/{prefix_len}", cur, length))
+        elif typ == 5 and length >= 8:
+            opts.append(node("MTU", str(u32(data, cur + 4)), cur, length))
+        else:
+            opts.append(node(f"ND Option {typ}", f"{length} bytes", cur, length))
+        cur += length
+    if opts:
+        children.append(node("Options", f"{cur - off} bytes", off, cur - off, children=opts))
 
 
 def _icmp(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
@@ -830,6 +1215,8 @@ def _icmp(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
         ctx.info = f"{tname} code={code}"
     layers.append(node("Internet Control Message Protocol", summary=ctx.info,
                        offset=off, length=min(8, end - off), children=children))
+    if typ in (3, 4, 5, 11, 12):
+        _icmp_original(data, off + 8, end, layers, ctx, ipv6=False)
 
 
 def _icmpv6(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
@@ -860,8 +1247,50 @@ def _icmpv6(data: bytes, off: int, end: int, layers: list, ctx: _Ctx) -> None:
         children.append(node("Identifier", str(ident), off + 4, 2))
         children.append(node("Sequence Number", str(seq), off + 6, 2))
         ctx.info = f"{tname} id={ident} seq={seq}"
+    elif typ == 2 and off + 8 <= end:
+        mtu = u32(data, off + 4)
+        children.append(node("MTU", str(mtu), off + 4, 4))
+        ctx.info = f"{tname} MTU={mtu}"
+    elif typ in (135, 136) and off + 24 <= end:
+        if typ == 136:
+            fl = u32(data, off + 4)
+            r_bit, s_bit, o_bit = bool(fl & 0x80000000), bool(fl & 0x40000000), bool(fl & 0x20000000)
+            children.append(node("Flags", f"R={int(r_bit)} S={int(s_bit)} O={int(o_bit)}", off + 4, 4))
+        else:
+            children.append(node("Reserved", f"0x{u32(data, off + 4):08x}", off + 4, 4))
+        target = ipv6_str(data, off + 8)
+        children.append(node("Target Address", target, off + 8, 16))
+        ctx.info = f"{tname} {target}"
+        _icmpv6_nd_options(data, off + 24, end, children)
+    elif typ == 134 and off + 16 <= end:
+        cur_hlim = data[off + 4]
+        ra_flags = data[off + 5]
+        lifetime = u16(data, off + 6)
+        reachable = u32(data, off + 8)
+        retrans = u32(data, off + 12)
+        children.append(node("Cur Hop Limit", str(cur_hlim), off + 4, 1))
+        children.append(node("Flags", f"0x{ra_flags:02x} (M={int(bool(ra_flags & 0x80))} O={int(bool(ra_flags & 0x40))})", off + 5, 1))
+        children.append(node("Router Lifetime", f"{lifetime} s", off + 6, 2))
+        children.append(node("Reachable Time", f"{reachable} ms", off + 8, 4))
+        children.append(node("Retrans Timer", f"{retrans} ms", off + 12, 4))
+        ctx.info = f"{tname} lifetime={lifetime}s"
+        _icmpv6_nd_options(data, off + 16, end, children)
+    elif typ == 133 and off + 8 <= end:
+        children.append(node("Reserved", f"0x{u32(data, off + 4):08x}", off + 4, 4))
+        _icmpv6_nd_options(data, off + 8, end, children)
+    elif typ == 137 and off + 40 <= end:
+        target = ipv6_str(data, off + 8)
+        dest = ipv6_str(data, off + 24)
+        children.append(node("Target Address", target, off + 8, 16))
+        children.append(node("Destination Address", dest, off + 24, 16))
+        ctx.info = f"{tname} target={target} dest={dest}"
+        _icmpv6_nd_options(data, off + 40, end, children)
     layers.append(node("Internet Control Message Protocol v6", summary=ctx.info,
-                       offset=off, length=min(end - off, 8), children=children))
+                       offset=off, length=min(end - off, 8 if typ in (128, 129) else (24 if typ in (135, 136) else 8)),
+                       children=children))
+    if typ in (1, 2, 3, 4):
+        orig_off = off + 8
+        _icmp_original(data, orig_off, end, layers, ctx, ipv6=True)
 
 
 def _read_dns_name(msg: bytes, off: int, depth: int = 0) -> tuple[str, int]:
@@ -1148,6 +1577,14 @@ def _tls(payload: bytes, off: int, layers: list, ctx: _Ctx) -> None:
             extra = "Application Data"
         elif typ == 21:
             extra = "Alert"
+            if take >= 2:
+                al = payload[cur + 5]
+                ad = payload[cur + 6]
+                al_n = {1: "Warning", 2: "Fatal"}.get(al, str(al))
+                ad_n = TLS_ALERT.get(ad, f"code {ad}")
+                children.append(node("Alert Level", al_n, frag_off, 1))
+                children.append(node("Alert Description", ad_n, frag_off + 1, 1))
+                extra = f"Alert ({al_n}: {ad_n})"
         recs.append(node("TLS Record", summary=f"{typ_n}, {ver_n}" + (f", {extra}" if extra else ""),
                          offset=rec_off, length=5 + take, children=children))
         infos.append(extra or typ_n)

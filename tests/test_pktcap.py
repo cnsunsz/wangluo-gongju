@@ -134,6 +134,33 @@ def tls_client_hello(sni="example.com") -> bytes:
     return rec
 
 
+
+def tls_alert(level=2, desc=40) -> bytes:
+    return bytes([21, 0x03, 0x03, 0x00, 0x02, level, desc])
+
+
+def dns_rcode(name="missing.example", rcode=3, typ=1, tid=0x1234) -> bytes:
+    def enc(n):
+        out = b""
+        for lab in n.split("."):
+            b = lab.encode()
+            out += bytes([len(b)]) + b
+        return out + b"\x00"
+    flags = 0x8180 | (rcode & 0xF)
+    header = struct.pack("!HHHHHH", tid, flags, 1, 0, 0, 0)
+    return header + enc(name) + struct.pack("!HH", typ, 1)
+
+
+def icmp_unreach(code, orig, typ=3, mtu=0) -> bytes:
+    rest = mtu if code == 4 else 0
+    body = struct.pack("!BBHI", typ, code, 0, rest) + orig
+    return struct.pack("!BBHI", typ, code, checksum(body), rest) + orig
+
+
+def http_status(code=500, reason="Internal Server Error") -> bytes:
+    return (f"HTTP/1.1 {code} {reason}\r\nContent-Length: 0\r\n\r\n").encode()
+
+
 def frame(dst, src, l3) -> bytes:
     # detect ip version
     ver = l3[0] >> 4
@@ -479,8 +506,12 @@ class TestImports(unittest.TestCase):
 
 
 class TestAnalysis(unittest.TestCase):
-    def _open(self, frames, ts0=1_700_000_000.0):
-        blob = write_pcap([{"ts": ts0 + i * 0.001, "data": f} for i, f in enumerate(frames)])
+    def _open(self, frames, ts0=1_700_000_000.0, spacing=0.001):
+        if isinstance(spacing, (list, tuple)):
+            times = [ts0 + float(x) for x in spacing]
+        else:
+            times = [ts0 + i * float(spacing) for i in range(len(frames))]
+        blob = write_pcap([{"ts": t, "data": f} for t, f in zip(times, frames)])
         session.clear_packets()
         session.open_bytes(blob, name="analysis-test.pcap")
         return session
@@ -672,8 +703,16 @@ class TestAnalysis(unittest.TestCase):
         self.assertIn("SYN", (cons[0].get("title") or "") + (cons[0].get("detail") or ""))
 
     def test_udp_vxlan_not_tcp_flags_and_detailed_conclusions(self):
-        # 与用户截图同类：UDP 10.145.11.162:33111 -> 10.145.32.22:4789
-        payload = b"\x08" + b"\x00" * 7 + b"inner-frame-placeholder" + b"\x00" * 40
+        # 与用户截图同类：UDP 10.145.11.162:33111 -> 10.145.32.22:4789，内层为 IPv6
+        inner_l4 = tcp_seg(443, 80, 1, 0, 0x02)
+        inner_l4 = bytearray(inner_l4)
+        inner_l4[16:18] = b"\x00\x00"
+        pseudo = ipv6("2001:db8::1") + ipv6("2001:db8::2") + struct.pack("!I", len(inner_l4)) + b"\x00\x00\x00\x06"
+        inner_l4[16:18] = struct.pack("!H", checksum(pseudo + bytes(inner_l4)))
+        inner_l4 = bytes(inner_l4)
+        inner_ip = ipv6_pkt("2001:db8::1", "2001:db8::2", 6, inner_l4)
+        inner_eth = mac("02:00:00:00:00:aa") + mac("02:00:00:00:00:bb") + struct.pack("!H", 0x86DD) + inner_ip
+        payload = b"\x08\x00\x00\x00" + (100).to_bytes(3, "big") + b"\x00" + inner_eth
         vxlan = frame(
             "02:00:00:00:00:02", "02:00:00:00:00:01",
             ipv4_pkt("10.145.11.162", "10.145.32.22", 17, udp_dgram(33111, 4789, payload)),
@@ -690,10 +729,19 @@ class TestAnalysis(unittest.TestCase):
         blob = self._concl_text(a1)
         for bad in ("标志组合异常", "未置位任何常见标志", "TCP 标志", "三次握手", "纯 ACK"):
             self.assertNotIn(bad, blob)
-        self.assertIn("UDP", blob)
+        self.assertTrue("UDP" in blob or "VXLAN" in blob, blob)
         self.assertTrue("VXLAN" in blob or "4789" in blob, blob)
+        self.assertIn("VNI 100", blob)
+        self.assertIn("2001:db8::1", blob)
+        self.assertIn("2001:db8::2", blob)
+        self.assertNotIn("尚未继续解析", blob)
         self.assertIn("10.145.11.162", blob)
         self.assertIn("10.145.32.22", blob)
+        self.assertEqual(session.packet_detail(1)["protocol"], "VXLAN")
+        self.assertNotIn("校验和", blob)
+        self.assertFalse(any("校验和" in (h.get("text") or "") for h in a1.get("hints") or []), a1.get("hints"))
+        diag_vx = session.diagnose()
+        self.assertFalse(any("校验和" in ((c.get("title") or "") + (c.get("detail") or "")) for c in diag_vx["conclusions"]), diag_vx["conclusions"])
         for c in cons:
             self.assertGreaterEqual(len((c.get("detail") or "").strip()), 40, c)
             self.assertNotIn("…", c.get("detail") or "")
@@ -716,6 +764,7 @@ class TestAnalysis(unittest.TestCase):
         self.assertIn("没有识别到 TCP", handshake["detail"])
         all_diag = "\n".join(c.get("detail") or "" for c in diag["conclusions"])
         self.assertNotIn("已有确认或数据", all_diag)
+        self.assertTrue(any("VXLAN" in (c.get("title") or "") or "VXLAN" in (c.get("detail") or "") for c in diag["conclusions"]), diag["conclusions"])
 
         # TCP 数据报文仍应给出多条详细结论，而不是一句空话
         data = frame(
@@ -733,6 +782,311 @@ class TestAnalysis(unittest.TestCase):
         payload_c = next(c for c in cons3 if c["title"] == "携带有效载荷")
         self.assertGreaterEqual(len(payload_c["detail"]), 40)
         self.assertNotEqual(payload_c["detail"].strip(), "这条报文携带有效载荷。")
+
+
+    def test_vxlan_and_tunnels_and_ecloud_blocks(self):
+        # 6in4：外层 IPv4，内层 IPv6 TCP
+        inner = ipv6_pkt("2001:db8::10", "2001:db8::20", 6, tcp_seg(12345, 443, 1, 0, 0x02))
+        sixin4 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                       ipv4_pkt("203.0.113.1", "203.0.113.2", 41, inner))
+        self._open([sixin4])
+        d = self._detail(1)
+        self.assertIn("2001:db8::10", d["info"] + self._concl_text(d["analysis"]))
+        blob = self._concl_text(d["analysis"])
+        self.assertTrue("6in4" in blob or "隧道" in blob or "IPv6" in blob, blob)
+        self.assertNotIn("尚未继续解析", blob)
+
+        # GRE 封装 IPv6
+        gre_pl = struct.pack("!HH", 0, 0x86DD) + ipv6_pkt(
+            "2001:db8::30", "2001:db8::40", 6, tcp_seg(23456, 80, 1, 0, 0x02)
+        )
+        gre = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("198.51.100.1", "198.51.100.2", 47, gre_pl))
+        self._open([gre])
+        d = self._detail(1)
+        blob = self._concl_text(d["analysis"])
+        self.assertIn("GRE", blob + (d.get("protocol") or "") + (d.get("info") or ""))
+        self.assertIn("2001:db8::30", blob + (d.get("info") or ""))
+
+        # ICMP 目的不可达，携带原始 TCP 到 445，代码 13 管理禁止
+        orig = ipv4_pkt("10.0.0.8", "10.0.0.9", 6, tcp_seg(50000, 445, 1000, 0, 0x02))
+        icmp = struct.pack("!BBHI", 3, 13, 0, 0) + orig
+        icmp = struct.pack("!BBHI", 3, 13, checksum(icmp), 0) + orig
+        unreach = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                        ipv4_pkt("10.0.0.1", "10.0.0.8", 1, icmp))
+        self._open([unreach])
+        d = self._detail(1)
+        blob = self._concl_text(d["analysis"])
+        self.assertIn("管理", blob)
+        self.assertTrue("445" in blob or "移动云" in blob or "禁止" in blob, blob)
+
+        # IPv6 邻居请求
+        ns_body = struct.pack("!BBHI", 135, 0, 0, 0) + ipv6("2001:db8::1") + bytes([1, 1]) + mac("02:00:00:00:00:0a")
+        ns = frame("33:33:00:00:00:01", "02:00:00:00:00:0a",
+                   ipv6_pkt("fe80::a", "ff02::1:ff00:1", 58, ns_body))
+        self._open([ns])
+        d = self._detail(1)
+        text = (d.get("info") or "") + " " + self._concl_text(d["analysis"])
+        self.assertTrue("2001:db8::1" in text or "邻居" in text, text)
+
+        # 移动云端口：445 SYN 重传无回应，同时 80 握手成功
+        syn445_a = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                         ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1000, 0, 0x02)))
+        syn445_b = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                         ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1000, 0, 0x02)))
+        syn80 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40001, 80, 2000, 0, 0x02)))
+        synack80 = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                         ipv4_pkt("192.168.1.20", "192.168.1.10", 6, tcp_seg(80, 40001, 3000, 2001, 0x12)))
+        ack80 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40001, 80, 2001, 3001, 0x10)))
+        syn25_a = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                        ipv4_pkt("192.168.1.10", "203.0.113.10", 6, tcp_seg(40002, 25, 4000, 0, 0x02)))
+        syn25_b = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                        ipv4_pkt("192.168.1.10", "203.0.113.10", 6, tcp_seg(40002, 25, 4000, 0, 0x02)))
+        # 445 / 25 的两次 SYN 间隔 1 秒，模拟真实重传；80 的握手紧挨着完成
+        self._open(
+            [syn445_a, syn445_b, syn80, synack80, ack80, syn25_a, syn25_b],
+            spacing=[0.0, 1.0, 2.0, 2.001, 2.002, 3.0, 4.0],
+        )
+
+        a445 = self._detail(1)["analysis"]
+        t445 = self._concl_text(a445)
+        self.assertIn("移动云", t445)
+        self.assertIn("445", t445)
+        self.assertNotIn("尚未继续解析", t445)
+
+        diag = session.diagnose()
+        titles = [c["title"] for c in diag["conclusions"]]
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") for c in diag["conclusions"])
+        self.assertTrue(any("移动云" in (c.get("title") or "") or "移动云" in (c.get("detail") or "") for c in diag["conclusions"]), titles)
+        self.assertIn("445", blob)
+        self.assertTrue("25" in blob or "SMTP" in blob, blob)
+        # 对照：80 是通的
+        self.assertTrue("80" in blob, blob)
+
+
+    def test_normal_traffic_not_reported_as_block(self):
+        syn80 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40001, 80, 2000, 0, 0x02)))
+        synack80 = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                         ipv4_pkt("192.168.1.20", "192.168.1.10", 6, tcp_seg(80, 40001, 3000, 2001, 0x12)))
+        ack80 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40001, 80, 2001, 3001, 0x10)))
+        syn445 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                       ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1000, 0, 0x02)))
+        synack445 = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                          ipv4_pkt("192.168.1.20", "192.168.1.10", 6, tcp_seg(445, 40000, 4000, 1001, 0x12)))
+        ack445 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                       ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1001, 4001, 0x10)))
+        self._open([syn80, synack80, ack80, syn445, synack445, ack445])
+        t80 = self._concl_text(self._detail(1)["analysis"])
+        self.assertNotIn("符合移动云高危端口拦截特征", t80)
+        self.assertNotIn("静默丢弃", t80)
+        t445 = self._concl_text(self._detail(4)["analysis"])
+        self.assertIn("445", t445)
+        self.assertNotIn("没有对应的 SYN-ACK", t445)
+        self.assertNotIn("符合移动云高危端口拦截特征", t445)
+        diag = session.diagnose()
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") for c in diag["conclusions"])
+        self.assertNotIn("疑似移动云或同类云平台的高危端口拦截", blob)
+        self.assertIn("完成", next(c for c in diag["conclusions"] if c["title"] == "TCP 握手")["detail"])
+
+    def test_rst_vs_silent_drop_wording(self):
+        syn_rst = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                        ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1000, 0, 0x02)))
+        rst = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                    ipv4_pkt("192.168.1.20", "192.168.1.10", 6, tcp_seg(445, 40000, 0, 1001, 0x14)))
+        self._open([syn_rst, rst], spacing=[0.0, 0.01])
+        t_rst = self._concl_text(self._detail(1)["analysis"]) + "\n" + self._concl_text(self._detail(2)["analysis"])
+        self.assertIn("RST", t_rst)
+        self.assertTrue("未监听" in t_rst or "拒绝" in t_rst, t_rst)
+        self.assertIn("静默丢弃不同", t_rst)
+        self.assertNotIn("表现一致", t_rst)
+        self.assertNotIn("符合移动云高危端口拦截特征", t_rst)
+        diag = session.diagnose()
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") for c in diag["conclusions"])
+        self.assertTrue("RST" in blob or "重置" in blob, blob)
+        self.assertTrue("未监听" in blob or "拒绝" in blob, blob)
+        self.assertNotIn("疑似移动云或同类云平台的高危端口拦截", blob)
+        self.assertTrue("静默丢弃不同" in blob or "与完全没有应答" in blob, blob)
+
+        syn_a = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1000, 0, 0x02)))
+        syn_b = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1000, 0, 0x02)))
+        self._open([syn_a, syn_b], spacing=[0.0, 1.0])
+        t_sil = self._concl_text(self._detail(1)["analysis"])
+        self.assertIn("445", t_sil)
+        self.assertIn("移动云", t_sil)
+        self.assertTrue("没有" in t_sil and "SYN-ACK" in t_sil, t_sil)
+        self.assertIn("静默丢弃", t_sil)
+        self.assertNotIn("并且出现了 RST", t_sil)
+        diag = session.diagnose()
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") for c in diag["conclusions"])
+        self.assertIn("445", blob)
+        self.assertTrue("静默" in blob or "丢弃" in blob, blob)
+        self.assertNotIn("被 RST 拒绝", blob)
+
+    def test_short_window_single_syn_not_confirmed_block(self):
+        syn = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                    ipv4_pkt("192.168.1.10", "192.168.1.20", 6, tcp_seg(40000, 445, 1000, 0, 0x02)))
+        self._open([syn])
+        t = self._concl_text(self._detail(1)["analysis"])
+        self.assertIn("移动云", t)
+        self.assertIn("445", t)
+        self.assertTrue("尚未见到应答" in t or "不能确认" in t or "窗口还较短" in t, t)
+        self.assertNotIn("符合移动云高危端口拦截特征", t)
+        self.assertNotIn("这与平台侧拦截", t)
+        diag = session.diagnose()
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") for c in diag["conclusions"])
+        self.assertNotIn("疑似移动云或同类云平台的高危端口拦截", blob)
+        hs = next(c for c in diag["conclusions"] if c["title"] == "TCP 握手")
+        self.assertTrue("窗口较短" in hs["detail"] or "尚不能确认" in hs["detail"], hs["detail"])
+
+    def test_icmp_admin_associated_with_blocked_ports(self):
+        syn445 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                       ipv4_pkt("10.0.0.8", "10.0.0.9", 6, tcp_seg(50000, 445, 1000, 0, 0x02)))
+        orig445 = ipv4_pkt("10.0.0.8", "10.0.0.9", 6, tcp_seg(50000, 445, 1000, 0, 0x02))
+        icmp445 = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                        ipv4_pkt("10.0.0.1", "10.0.0.8", 1, icmp_unreach(13, orig445)))
+        syn25 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("10.0.0.8", "203.0.113.10", 6, tcp_seg(50001, 25, 2000, 0, 0x02)))
+        orig25 = ipv4_pkt("10.0.0.8", "203.0.113.10", 6, tcp_seg(50001, 25, 2000, 0, 0x02))
+        icmp25 = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                       ipv4_pkt("10.0.0.1", "10.0.0.8", 1, icmp_unreach(13, orig25)))
+        self._open([syn445, icmp445, syn25, icmp25], spacing=[0.0, 0.02, 0.03, 0.05])
+        t_icmp = self._concl_text(self._detail(2)["analysis"])
+        self.assertIn("管理", t_icmp)
+        self.assertIn("445", t_icmp)
+        self.assertTrue("原始" in t_icmp or "原报文" in t_icmp, t_icmp)
+        t25 = self._concl_text(self._detail(4)["analysis"])
+        self.assertTrue("25" in t25 or "SMTP" in t25, t25)
+        self.assertIn("管理", t25)
+        diag = session.diagnose()
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") + " " + (c.get("evidence") or "")
+                         for c in diag["conclusions"])
+        self.assertIn("445", blob)
+        self.assertTrue("管理" in blob, blob)
+        self.assertTrue("25" in blob or "SMTP" in blob, blob)
+        # SYN 失败与 ICMP 管理禁止应写在同一条相关结论里，而不是互不提及
+        related = [c for c in diag["conclusions"]
+                   if "445" in ((c.get("title") or "") + (c.get("detail") or "") + (c.get("evidence") or ""))
+                   and "管理" in ((c.get("title") or "") + (c.get("detail") or "") + (c.get("evidence") or ""))]
+        self.assertTrue(related, blob)
+
+    def test_vxlan_4789_not_treated_as_blocked(self):
+        inner_l4 = tcp_seg(443, 80, 1, 0, 0x02)
+        inner_l4 = bytearray(inner_l4)
+        inner_l4[16:18] = b"\x00\x00"
+        pseudo = ipv6("2001:db8::1") + ipv6("2001:db8::2") + struct.pack("!I", len(inner_l4)) + b"\x00\x00\x00\x06"
+        inner_l4[16:18] = struct.pack("!H", checksum(pseudo + bytes(inner_l4)))
+        inner_ip = ipv6_pkt("2001:db8::1", "2001:db8::2", 6, bytes(inner_l4))
+        inner_eth = mac("02:00:00:00:00:aa") + mac("02:00:00:00:00:bb") + struct.pack("!H", 0x86DD) + inner_ip
+        payload = b"\x08\x00\x00\x00" + (100).to_bytes(3, "big") + b"\x00" + inner_eth
+        vxlan = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                      ipv4_pkt("10.145.11.162", "10.145.32.22", 17, udp_dgram(33111, 4789, payload)))
+        self._open([vxlan])
+        t = self._concl_text(self._detail(1)["analysis"])
+        self.assertIn("VXLAN", t)
+        self.assertNotIn("符合移动云", t)
+        self.assertNotIn("高危拦截端口", t)
+        diag = session.diagnose()
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") + " " + (c.get("evidence") or "")
+                         for c in diag["conclusions"])
+        self.assertNotIn("疑似移动云", blob)
+        self.assertNotIn("高危端口访问失败", blob)
+        # 4789 可以作为 VXLAN 端口出现，但不能被写成被封端口
+        if "4789" in blob:
+            self.assertNotIn("被封", blob)
+            self.assertFalse("拦截" in blob and "4789" in blob and "符合" in blob, blob)
+
+    def test_dns_http_tls_alert_and_needfrag(self):
+        q = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                  ipv4_pkt("192.0.2.10", "192.0.2.53", 17, udp_dgram(53000, 53, dns_query("gone.example"))))
+        nx = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                   ipv4_pkt("192.0.2.53", "192.0.2.10", 17, udp_dgram(53, 53000, dns_rcode("gone.example", 3))))
+        q2 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                   ipv4_pkt("192.0.2.10", "192.0.2.53", 17, udp_dgram(53001, 53, dns_query("fail.example", tid=0x2222))))
+        sf = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                   ipv4_pkt("192.0.2.53", "192.0.2.10", 17, udp_dgram(53, 53001, dns_rcode("fail.example", 2, tid=0x2222))))
+        q3 = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                   ipv4_pkt("192.0.2.10", "192.0.2.53", 17, udp_dgram(53002, 53, dns_query("timeout.example", tid=0x3333))))
+        http = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                     ipv4_pkt("192.0.2.20", "192.0.2.10", 6, tcp_seg(80, 54321, 1, 1, 0x18, http_status(500))))
+        alert = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                      ipv4_pkt("192.0.2.20", "192.0.2.10", 6, tcp_seg(443, 41000, 1, 1, 0x18, tls_alert(2, 40))))
+        orig = ipv4_pkt("192.0.2.10", "192.0.2.20", 6, tcp_seg(41000, 443, 10, 1, 0x18, b"x" * 20), flags=2)
+        need = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                     ipv4_pkt("192.0.2.1", "192.0.2.10", 1, icmp_unreach(4, orig, mtu=1280)))
+        self._open([q, nx, q2, sf, q3, http, alert, need], spacing=[0.0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 2.0])
+        t_nx = self._concl_text(self._detail(2)["analysis"])
+        self.assertTrue("NXDOMAIN" in t_nx or "不存在" in t_nx, t_nx)
+        t_sf = self._concl_text(self._detail(4)["analysis"])
+        self.assertTrue("SERVFAIL" in t_sf or "服务器失败" in t_sf or "Server failure" in t_sf, t_sf)
+        t_http = self._concl_text(self._detail(6)["analysis"])
+        self.assertTrue("500" in t_http, t_http)
+        t_alert = self._concl_text(self._detail(7)["analysis"])
+        self.assertIn("Alert", t_alert)
+        t_frag = self._concl_text(self._detail(8)["analysis"])
+        self.assertTrue("分片" in t_frag or "过大" in t_frag or "DF" in t_frag, t_frag)
+        diag = session.diagnose()
+        blob = "\n".join((c.get("title") or "") + " " + (c.get("detail") or "") + " " + (c.get("evidence") or "")
+                         for c in diag["conclusions"])
+        self.assertTrue("NXDOMAIN" in blob or "gone.example" in blob, blob)
+        self.assertTrue("Server failure" in blob or "SERVFAIL" in blob or "失败" in blob, blob)
+        self.assertTrue("超时" in blob or "timeout.example" in blob, blob)
+        self.assertTrue("500" in blob or "5xx" in blob, blob)
+        self.assertIn("Alert", blob)
+        self.assertTrue("分片" in blob or "报文过大" in blob or "PMTU" in blob or "MTU" in blob, blob)
+
+    def test_icmp_minimum_quote_and_exact_flow_match(self):
+        from core.pktcap.analysis import _collect_icmp_events, _match_icmp_event
+        original = ipv4_pkt("10.0.0.8", "10.0.0.20", 6, tcp_seg(50000, 445, 1, 0, 2))
+        quoted = original[:28]  # IPv4 header plus only eight TCP bytes
+        raw = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                    ipv4_pkt("10.0.0.1", "10.0.0.8", 1, icmp_unreach(13, quoted)))
+        v = dissect(raw)
+        self.assertEqual(v["icmp_orig_dport"], 445)
+        self.assertEqual(v["icmp_orig_sport"], 50000)
+        events = _collect_icmp_events([v])
+        self.assertIsNotNone(_match_icmp_event(events, "10.0.0.8", "10.0.0.20", 445, sport=50000))
+        self.assertIsNone(_match_icmp_event(events, "10.0.0.8", "10.0.0.2", 445, sport=50000))
+        self.assertIsNone(_match_icmp_event(events, "10.0.0.9", "10.0.0.20", 445, sport=50000))
+        self.assertIsNone(_match_icmp_event(events, "10.0.0.8", "10.0.0.20", 445, sport=50001))
+        self._open([raw])
+        self.assertIn("445", self._concl_text(self._detail(1)["analysis"]))
+
+    def test_udp_without_reply_not_proof_of_cloud_block(self):
+        raw = frame("ff:ff:ff:ff:ff:ff", "02:00:00:00:00:01",
+                    ipv4_pkt("10.0.0.8", "10.0.0.255", 17, udp_dgram(50000, 138, b"datagram")))
+        self._open([raw, raw], spacing=[0, 3])
+        titles = [c["title"] for c in session.diagnose()["conclusions"]]
+        self.assertFalse(any("拦截" in title for title in titles), titles)
+
+    def test_inner_tcp_packet_context_tracks_real_handshake(self):
+        from core.pktcap.analysis import _outcome_for_view
+        def wrap(src, dst, sport, dport, seq, ack, flags):
+            inner = frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                          ipv4_pkt(src, dst, 6, tcp_seg(sport, dport, seq, ack, flags)))
+            payload = b"\x08\0\0\0\0\0\x64\0" + inner
+            return dissect(frame("02:00:00:00:00:02", "02:00:00:00:00:01",
+                                 ipv4_pkt("10.145.1.1", "10.145.1.2", 17, udp_dgram(33111, 4789, payload))))
+        syn = wrap("10.0.0.8", "10.0.0.9", 50000, 445, 1, 0, 2)
+        synack = wrap("10.0.0.9", "10.0.0.8", 445, 50000, 10, 2, 0x12)
+        self.assertEqual(_outcome_for_view(syn, inner_stream=[syn, synack])["kind"], "ok")
+
+    def test_ipv6_admin_prohibited_original_port(self):
+        original = ipv6_pkt("2001:db8::8", "2001:db8::9", 6, tcp_seg(50000, 25, 1, 0, 2))
+        quote = struct.pack("!BBHI", 1, 1, 0, 0) + original[:48]
+        raw = frame("02:00:00:00:00:01", "02:00:00:00:00:02",
+                    ipv6_pkt("2001:db8::1", "2001:db8::8", 58, quote))
+        self._open([raw])
+        text = self._concl_text(self._detail(1)["analysis"])
+        self.assertIn("25", text)
+        self.assertIn("管理", text)
+        diagnosis = session.diagnose()
+        self.assertTrue(any("25" in c["detail"] and "管理" in c["detail"] for c in diagnosis["conclusions"]))
 
     def tearDown(self):
         try:
